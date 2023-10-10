@@ -22,6 +22,20 @@ std::pair<uint32_t, uint32_t> AbstractIndex::search(const data_type *query, cons
     return _search(any_query, K, L, any_indices, distances);
 }
 
+
+template <typename data_type, typename IDType>
+std::pair<uint32_t, uint32_t> AbstractIndex::search_ret_route(const data_type *query, const size_t K, const uint32_t L,
+                                                              IDType *indices, std::vector<IDType>& route, float *distances)
+{
+        auto any_indices = std::any(indices);
+        auto any_query = std::any(query);
+        auto any_route = std::any(route);
+        auto ret = _search_ret_route(any_query, K, L, any_indices, any_route, distances);
+        route = std::any_cast<std::vector<IDType>>(any_route);
+        return ret;
+}
+
+
 template <typename data_type, typename tag_type>
 size_t AbstractIndex::search_with_tags(const data_type *query, const uint64_t K, const uint32_t L, tag_type *tags,
                                        float *distances, std::vector<data_type *> &res_vectors)
@@ -125,6 +139,8 @@ template DISKANN_DLLEXPORT void AbstractIndex::build<uint8_t, uint64_t>(const ui
                                                                         const size_t num_points_to_load,
                                                                         const std::vector<uint64_t> &tags);
 
+// limit IDtype and datatype
+// ID TYPE : u32_t
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<float, uint32_t>(
     const float *query, const size_t K, const uint32_t L, uint32_t *indices, float *distances);
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<uint8_t, uint32_t>(
@@ -132,12 +148,19 @@ template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<u
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<int8_t, uint32_t>(
     const int8_t *query, const size_t K, const uint32_t L, uint32_t *indices, float *distances);
 
+// ID TYPE : u64_t
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<float, uint64_t>(
     const float *query, const size_t K, const uint32_t L, uint64_t *indices, float *distances);
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<uint8_t, uint64_t>(
     const uint8_t *query, const size_t K, const uint32_t L, uint64_t *indices, float *distances);
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search<int8_t, uint64_t>(
     const int8_t *query, const size_t K, const uint32_t L, uint64_t *indices, float *distances);
+
+
+template
+std::pair<uint32_t, uint32_t> AbstractIndex::search_ret_route(const float *query, const size_t K, const uint32_t L,
+                                                              uint32_t *indices, std::vector<uint32_t>& route, float *distances);
+
 
 template DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> AbstractIndex::search_with_filters<uint32_t>(
     const DataType &query, const std::string &raw_label, const size_t K, const uint32_t L, uint32_t *indices,

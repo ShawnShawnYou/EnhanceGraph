@@ -21,6 +21,11 @@ namespace diskann
 template <typename data_t> class InMemDataStore : public AbstractDataStore<data_t>
 {
   public:
+    void get_data(data_t* vec, location_t id) override {
+        std::memcpy(vec, _data + id * _aligned_dim, _aligned_dim * sizeof(data_t));
+    };
+
+
     InMemDataStore(const location_t capacity, const size_t dim, std::unique_ptr<Distance<data_t>> distance_fn);
     virtual ~InMemDataStore();
 

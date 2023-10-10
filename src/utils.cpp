@@ -126,6 +126,18 @@ void normalize_data_file(const std::string &inFileName, const std::string &outFi
     diskann::cout << "Wrote normalized points to file: " << outFileName << std::endl;
 }
 
+
+/**
+ *
+ * @param num_queries   query_num
+ * @param gold_std      gt_ids
+ * @param gs_dist       gt_dists
+ * @param dim_gs        gt_dim
+ * @param our_results   query_result_ids[test_id].data()
+ * @param dim_or        recall_at ( K )
+ * @param recall_at     curr_recall
+ * @return
+ */
 double calculate_recall(uint32_t num_queries, uint32_t *gold_std, float *gs_dist, uint32_t dim_gs,
                         uint32_t *our_results, uint32_t dim_or, uint32_t recall_at)
 {

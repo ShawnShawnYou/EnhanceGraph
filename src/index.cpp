@@ -866,7 +866,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
             }
             else
             {
-                distance = _data_store->get_distance(aligned_query, id);
+                distance = _data_store->get_distance(aligned_query, id);    // dist( vec, location_id )
             }
             Neighbor nn = Neighbor(id, distance);
             best_L_nodes.insert(nn);
@@ -880,7 +880,8 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
     {
         auto nbr = best_L_nodes.closest_unexpanded();
         auto n = nbr.id;
-
+        scratch->route().push_back(n);
+        hops += 1;
         // Add node to expanded nodes to create pool for prune later
         if (!search_invocation)
         {
@@ -1033,7 +1034,7 @@ void Index<T, TagT, LabelT>::occlude_list(const uint32_t location, std::vector<N
     assert(result.size() == 0);
     if (pool.size() > maxc)
         pool.resize(maxc);
-    std::vector<float> &occlude_factor = scratch->occlude_factor();
+    std::vector<float> &occlude_factor = scratch->occlude_factor(); // todo: d1 / d2
     // occlude_list can be called with the same scratch more than once by
     // search_for_point_and_add_link through inter_insert.
     occlude_factor.clear();
@@ -1143,7 +1144,7 @@ void Index<T, TagT, LabelT>::prune_neighbors(const uint32_t location, std::vecto
     pruned_list.clear();
     pruned_list.reserve(range);
 
-    occlude_list(location, pool, alpha, range, max_candidate_size, pruned_list, scratch);
+    occlude_list(location, pool, alpha, range, max_candidate_size, pruned_list, scratch);   // todo key: robust prune
     assert(pruned_list.size() <= range);
 
     if (_saturate_graph && alpha > 1)
@@ -1265,7 +1266,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
     {
         auto node = visit_order[node_ctr];
 
-        ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);
+        ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);  // multi-threads pop a scratch
         auto scratch = manager.scratch_space();
 
         std::vector<uint32_t> pruned_list;
@@ -1276,7 +1277,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
         }
         else
         {
-            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, scratch);
+            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, scratch); // todo key
         }
         {
             LockGuard guard(_locks[node]);
@@ -1285,7 +1286,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
             assert(_graph_store->get_neighbours((location_t)node).size() <= _indexingRange);
         }
 
-        inter_insert(node, pruned_list, scratch);
+        inter_insert(node, pruned_list, scratch);   // todo key
 
         if (node_ctr % 100000 == 0)
         {
@@ -1503,7 +1504,7 @@ void Index<T, TagT, LabelT>::build_with_data_populated(const std::vector<TagT> &
     }
 
     generate_frozen_point();
-    link();
+    link(); // todo: key
 
     size_t max = 0, min = SIZE_MAX, total = 0, cnt = 0;
     for (size_t i = 0; i < _nd; i++)
@@ -1923,6 +1924,49 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::_search(const DataType &qu
     }
 }
 
+
+template <typename T, typename TagT, typename LabelT>
+std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::_search_ret_route(const DataType &query, const size_t K, const uint32_t L,
+                                                                        std::any &indices, std::any &route, float *distances)
+{
+    try
+    {
+        auto typed_query = std::any_cast<const T *>(query);
+        if (typeid(uint32_t *) == indices.type())
+        {
+            auto u32_ptr = std::any_cast<uint32_t *>(indices);
+            auto u32_ptr_route = std::any_cast<std::vector<uint32_t>>(route);
+            auto ret = this->search_ret_route_sub(typed_query, K, L, u32_ptr, u32_ptr_route, distances);
+            route = u32_ptr_route;
+            return ret;
+
+        }
+        else if (typeid(uint64_t *) == indices.type())
+        {
+            auto u64_ptr = std::any_cast<uint64_t *>(indices);
+            auto u64_ptr_route = std::any_cast<std::vector<uint64_t>>(route);
+            auto ret = this->search_ret_route_sub(typed_query, K, L, u64_ptr, u64_ptr_route, distances);
+            route = u64_ptr_route;
+            return ret;
+        }
+        else
+        {
+            throw ANNException("Error: indices type can only be uint64_t or uint32_t.", -1);
+        }
+    }
+    catch (const std::bad_any_cast &e)
+    {
+        throw ANNException("Error: bad any cast while searching. " + std::string(e.what()), -1);
+    }
+    catch (const std::exception &e)
+    {
+        throw ANNException("Error: " + std::string(e.what()), -1);
+    }
+}
+
+
+
+
 template <typename T, typename TagT, typename LabelT>
 template <typename IdType>
 std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search(const T *query, const size_t K, const uint32_t L,
@@ -1945,11 +1989,23 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search(const T *query, con
     }
 
     const std::vector<LabelT> unused_filter_label;
-    const std::vector<uint32_t> init_ids = get_init_ids();
+    const std::vector<uint32_t> init_ids = get_init_ids();  // 一般只有start的那个node + _num_frozen_pts个多的
 
     std::shared_lock<std::shared_timed_mutex> lock(_update_lock);
 
+    // 将query里面dim数量的向量的放进scratch->aligned_query()中
     _data_store->get_dist_fn()->preprocess_query(query, _data_store->get_dims(), scratch->aligned_query());
+
+
+    // 测试发现sift数据集中，build的数据和query的数据是重合的。
+//    std::vector<location_t> neighbors = _graph_store->get_neighbours(21);
+//    T* data_vec = new T[_data_store->get_aligned_dim()];
+//    _data_store->get_data(data_vec, 21);
+//    std::vector<T> nn_vec(data_vec, data_vec + _data_store->get_aligned_dim());
+//    std::vector<T> query_vec(query, query + _data_store->get_aligned_dim());
+//    float distance = _data_store->get_distance(query, 21);
+//    delete[] data_vec;
+
 
     auto retval =
         iterate_to_fixed_point(scratch->aligned_query(), L, init_ids, scratch, false, unused_filter_label, true);
@@ -1986,6 +2042,83 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search(const T *query, con
 
     return retval;
 }
+
+
+
+template <typename T, typename TagT, typename LabelT>
+template <typename IDType>
+DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search_ret_route_sub(const T *query, const size_t K, const uint32_t L,
+                                                                                             IDType *indices, std::vector<IDType>& route, float *distances)
+{
+    if (K > (uint64_t)L)
+    {
+        throw ANNException("Set L to a value of at least K", -1, __FUNCSIG__, __FILE__, __LINE__);
+    }
+
+    ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);
+    auto scratch = manager.scratch_space();
+
+    if (L > scratch->get_L())
+    {
+        diskann::cout << "Attempting to expand query scratch_space. Was created "
+        << "with Lsize: " << scratch->get_L() << " but search L is: " << L << std::endl;
+        scratch->resize_for_new_L(L);
+        diskann::cout << "Resize completed. New scratch->L is " << scratch->get_L() << std::endl;
+    }
+
+    const std::vector<LabelT> unused_filter_label;
+    const std::vector<uint32_t> init_ids = get_init_ids();  // 一般只有start的那个node + _num_frozen_pts个多的
+
+    std::shared_lock<std::shared_timed_mutex> lock(_update_lock);
+
+    // 将query里面dim数量的向量的放进scratch->aligned_query()中
+    _data_store->get_dist_fn()->preprocess_query(query, _data_store->get_dims(), scratch->aligned_query());
+
+    auto retval =
+            iterate_to_fixed_point(scratch->aligned_query(), L, init_ids, scratch, false, unused_filter_label, true);
+
+    /**********/
+    route.assign(scratch->route().begin(), scratch->route().end());
+    scratch->route().clear();
+    scratch->route().shrink_to_fit();
+    /**********/
+
+    NeighborPriorityQueue &best_L_nodes = scratch->best_l_nodes();
+
+    size_t pos = 0;
+    for (size_t i = 0; i < best_L_nodes.size(); ++i)
+    {
+        if (best_L_nodes[i].id < _max_points)
+        {
+            // safe because Index uses uint32_t ids internally
+            // and IDType will be uint32_t or uint64_t
+            indices[pos] = (IDType)best_L_nodes[i].id;
+            if (distances != nullptr)
+            {
+#ifdef EXEC_ENV_OLS
+                // DLVS expects negative distances
+                distances[pos] = best_L_nodes[i].distance;
+#else
+                distances[pos] = _dist_metric == diskann::Metric::INNER_PRODUCT ? -1 * best_L_nodes[i].distance
+                        : best_L_nodes[i].distance;
+#endif
+            }
+            pos++;
+        }
+        if (pos == K)
+            break;
+    }
+    if (pos < K)
+    {
+        diskann::cerr << "Found pos: " << pos << "fewer than K elements " << K << " for query" << std::endl;
+    }
+
+    return retval;
+}
+
+
+
+
 
 template <typename T, typename TagT, typename LabelT>
 std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::_search_with_filters(const DataType &query,

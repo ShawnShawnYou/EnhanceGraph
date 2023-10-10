@@ -16,6 +16,8 @@ namespace diskann
 template <typename data_t> class AbstractDataStore
 {
   public:
+    virtual void get_data(data_t* vec, location_t id) = 0;
+
     AbstractDataStore(const location_t capacity, const size_t dim);
 
     virtual ~AbstractDataStore() = default;

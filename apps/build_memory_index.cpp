@@ -120,6 +120,8 @@ int main(int argc, char **argv)
         size_t data_num, data_dim;
         diskann::get_bin_metadata(data_path, data_num, data_dim);
 
+        //        size_t data_num = 10000, data_dim = 128;
+
         auto index_build_params = diskann::IndexWriteParametersBuilder(L, R)
                                       .with_filter_list_size(Lf)
                                       .with_alpha(alpha)
@@ -148,9 +150,24 @@ int main(int argc, char **argv)
                           .with_num_pq_chunks(build_PQ_bytes)
                           .build();
 
+//        float* query = new float[data_dim * data_num];
+//
+//        std::default_random_engine generator(std::time(nullptr));
+//        std::uniform_real_distribution<float> distribution(0.0f, 1.0f);
+//
+//        for (size_t i = 0; i < data_dim * data_num; ++i) {
+//            float random_float = distribution(generator);
+//            query[i] = random_float;
+//        }
+//        std::vector<uint32_t> tags;
+//        for (int i = 0; i < 10000; ++i) {
+//            tags.push_back(i);
+//        }
+
         auto index_factory = diskann::IndexFactory(config);
         auto index = index_factory.create_instance();
         index->build(data_path, data_num, filter_params);
+//        index->build(query, data_num, tags);
         index->save(index_path_prefix.c_str());
         index.reset();
         return 0;
@@ -162,3 +179,13 @@ int main(int argc, char **argv)
         return -1;
     }
 }
+// build
+// --data_type float --dist_fn l2 --data_path data/sift/sift_learn.fbin --index_path_prefix data/sift/index_sift_learn_R32_L50_A1.2 -R 32 -L 50 --alpha 1.2
+// --data_type float --dist_fn l2 --data_path data/random/random_learn.fbin --index_path_prefix data/random/index_random_learn_R32_L50_A1.2 -R 32 -L 50 --alpha 1.2
+// --data_type float --dist_fn l2 --data_path data/gist/gist_learn.fbin --index_path_prefix data/gist/index_gist_learn_R32_L50_A1.2 -R 32 -L 50 --alpha 1.2
+
+// compute gt
+// --data_type float --dist_fn l2 --base_file data/sift/sift_learn.fbin --query_file  data/sift/sift_query.fbin --gt_file data/sift/sift_query_learn_gt100 --K 100
+// --data_type float --dist_fn l2 --base_file data/random/random_learn.fbin --query_file  data/random/random_query.fbin --gt_file data/random/random_query_learn_gt100 --K 100
+// --data_type float --dist_fn l2 --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_query.fbin --gt_file data/gist/gist_query_learn_gt100 --K 100
+// --data_type float --dist_fn l2 --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_random_query.fbin --gt_file data/gist/gist_random_query_learn_gt100 --K 100

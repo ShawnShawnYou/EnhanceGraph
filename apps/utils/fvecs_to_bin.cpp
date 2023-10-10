@@ -5,13 +5,18 @@
 #include "utils.h"
 
 // Convert float types
-void block_convert_float(std::ifstream &reader, std::ofstream &writer, float *read_buf, float *write_buf, size_t npts,
-                         size_t ndims)
+void block_convert_float(std::ifstream &reader, std::ofstream &writer, float *read_buf, float *write_buf,
+                         size_t npts, size_t ndims, size_t jump_npts)
 {
-    reader.read((char *)read_buf, npts * (ndims * sizeof(float) + sizeof(uint32_t)));
+    reader.read((char *)read_buf, (npts + jump_npts) * (ndims * sizeof(float) + sizeof(uint32_t)));
     for (size_t i = 0; i < npts; i++)
     {
-        memcpy(write_buf + i * ndims, (read_buf + i * (ndims + 1)) + 1, ndims * sizeof(float));
+//        std::vector<float> vec((read_buf + (i + jump_npts) * (ndims + 1)) + 1, (read_buf + (i + 1 + jump_npts) * (ndims + 1)) + 1);
+
+        memcpy(write_buf + i * ndims, (read_buf + (i + jump_npts) * (ndims + 1)) + 1, ndims * sizeof(float));
+        // memcpy(write_buf[i * ndims], read_
+        // read_buf 里面存了1位uint和128位向量数buf[i * (ndims + 1) + 1], ndims * sizeof(float));
+        // write_buf 里面只保存128维的向量数据, writer要先写npts和ndims
     }
     writer.write((char *)write_buf, npts * ndims * sizeof(float));
 }
@@ -29,13 +34,132 @@ void block_convert_byte(std::ifstream &reader, std::ofstream &writer, uint8_t *r
     writer.write((char *)write_buf, npts * ndims * sizeof(uint8_t));
 }
 
+
+void generate_random_dataset_fbin() {
+    std::string random_data_bin_dir = "/app/DiskANN/build/data/random";
+    std::string random_learn_path = random_data_bin_dir + "/random_learn.fbin";
+    std::string random_query_path = random_data_bin_dir + "/random_query.fbin";
+
+    std::ofstream learn_writer(random_learn_path, std::ios::binary);
+    std::ofstream query_writer(random_query_path, std::ios::binary);
+
+    uint32_t chunk = 1;
+    uint32_t data_dim = 128;
+    size_t learn_data_size = 100000;
+    size_t query_data_size = 10000;
+
+    float *learn_write_buf = new float[chunk * data_dim * learn_data_size];
+    float *query_write_buf = new float[chunk * data_dim * query_data_size];
+
+    std::default_random_engine generator(std::time(nullptr));
+    std::uniform_real_distribution<float> distribution(0.0f, 50.0f);
+
+    for (int i = 0; i < learn_data_size; ++i) {
+        for (int j = 0; j < data_dim; ++j) {
+            learn_write_buf[i + j] = distribution(generator);
+        }
+    }
+
+    for (int i = 0; i < query_data_size; ++i) {
+        for (int j = 0; j < data_dim; ++j) {
+            query_write_buf[i + j] = distribution(generator);
+        }
+    }
+
+    learn_writer.write((char *)&learn_data_size, sizeof(int32_t));
+    learn_writer.write((char *)&data_dim, sizeof(int32_t));
+    learn_writer.write((char *)learn_write_buf, learn_data_size * data_dim * sizeof(float));
+
+    query_writer.write((char *)&query_data_size, sizeof(int32_t));
+    query_writer.write((char *)&data_dim, sizeof(int32_t));
+    query_writer.write((char *)query_write_buf, query_data_size * data_dim * sizeof(float));
+
+    delete[] learn_write_buf;
+    delete[] query_write_buf;
+
+    query_writer.close();
+    learn_writer.close();
+
+    return ;
+}
+
+
+void generate_random_data_based_on_origin(std::string original_data_path, std::string new_data_path,
+                                          size_t jump_npts = 5000, size_t num_copy = 100, size_t num_base = 500) {
+
+    std::ifstream reader(original_data_path, std::ios::binary | std::ios::ate);
+    std::ofstream writer(new_data_path, std::ios::binary);
+
+    size_t fsize = reader.tellg();
+    reader.seekg(0, std::ios::beg);
+    uint32_t ndims_u32;
+    reader.read((char *)&ndims_u32, sizeof(uint32_t));
+    reader.seekg(0, std::ios::beg);
+
+    int datasize = sizeof(float);
+    size_t ndims = (size_t)ndims_u32;
+    size_t npts = fsize / ((ndims * datasize) + sizeof(uint32_t));
+
+    uint8_t *read_buf = new uint8_t[npts * ((ndims * datasize) + sizeof(uint32_t))];
+    reader.read((char *)read_buf, (npts + jump_npts) * (ndims * sizeof(float) + sizeof(uint32_t)));
+
+
+    size_t npts_generated = num_copy * num_base;
+    writer.write((char *)&npts_generated, sizeof(int32_t));
+    writer.write((char *)&ndims, sizeof(int32_t));
+    float *write_buf = new float[npts_generated * ndims * datasize];
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::uniform_real_distribution<> dis(-0.005, 0.005);    // gist: 0.0 - 0.01
+
+
+    for (int i = 0; i < num_base; i++) {
+        float* query = ((float*)read_buf + (i + jump_npts) * (ndims + 1)) + 1;
+        float data;
+
+        for (int j = 0; j < num_copy; j++) {
+
+            for (int dim = 0; dim < ndims; dim++) {
+                data = *(query + dim) + dis(gen);
+                *(write_buf + (i * num_copy + j) * ndims + dim) = data;
+            }
+
+        }
+
+    }
+    std::vector<float> test_vec(write_buf, write_buf + 2 * ndims);
+    writer.write((char *)write_buf, npts_generated * ndims * sizeof(float));
+
+    delete[] write_buf;
+    delete[] read_buf;
+
+    writer.close();
+    reader.close();
+}
+
+
+
 int main(int argc, char **argv)
 {
-    if (argc != 4)
+    generate_random_data_based_on_origin("data/gist/gist_base.fvecs", "data/gist/gist_random_query.fbin");
+    return 0;
+//
+//    generate_random_dataset_fbin();
+//    return 0;
+
+    size_t target_npts = 0;
+    size_t jump_npts = 0;
+
+    if (argc < 4)
     {
         std::cout << argv[0] << " <float/int8/uint8> input_vecs output_bin" << std::endl;
         exit(-1);
     }
+    if (argc >= 5)
+        target_npts = std::stoi(argv[4]);
+    if (argc >= 6)
+        jump_npts = std::stoi(argv[5]);
 
     int datasize = sizeof(float);
 
@@ -57,19 +181,30 @@ int main(int argc, char **argv)
     reader.read((char *)&ndims_u32, sizeof(uint32_t));
     reader.seekg(0, std::ios::beg);
     size_t ndims = (size_t)ndims_u32;
+    // 先读取第一个向量的维数，再重置reader
+
     size_t npts = fsize / ((ndims * datasize) + sizeof(uint32_t));
+    if (target_npts + jump_npts > npts) {
+        std::cout << "Error: too much target and jump npts" << std::endl;
+        exit(-1);
+    }
+    npts = std::min(npts, target_npts);
+
     std::cout << "Dataset: #pts = " << npts << ", # dims = " << ndims << std::endl;
 
-    size_t blk_size = 131072;
+    size_t blk_size = 131072;   // todo: blk
     size_t nblks = ROUND_UP(npts, blk_size) / blk_size;
     std::cout << "# blks: " << nblks << std::endl;
     std::ofstream writer(argv[3], std::ios::binary);
     int32_t npts_s32 = (int32_t)npts;
     int32_t ndims_s32 = (int32_t)ndims;
+
+
     writer.write((char *)&npts_s32, sizeof(int32_t));
     writer.write((char *)&ndims_s32, sizeof(int32_t));
+    // 先写这两个数据
 
-    size_t chunknpts = std::min(npts, blk_size);
+    size_t chunknpts = std::min(npts + jump_npts, blk_size);
     uint8_t *read_buf = new uint8_t[chunknpts * ((ndims * datasize) + sizeof(uint32_t))];
     uint8_t *write_buf = new uint8_t[chunknpts * ndims * datasize];
 
@@ -78,7 +213,7 @@ int main(int argc, char **argv)
         size_t cblk_size = std::min(npts - i * blk_size, blk_size);
         if (datasize == sizeof(float))
         {
-            block_convert_float(reader, writer, (float *)read_buf, (float *)write_buf, cblk_size, ndims);
+            block_convert_float(reader, writer, (float *)read_buf, (float *)write_buf, cblk_size, ndims, jump_npts);
         }
         else
         {
@@ -93,3 +228,8 @@ int main(int argc, char **argv)
     reader.close();
     writer.close();
 }
+
+// float data/sift/sift_query.fvecs data/sift/sift_query.fbin 5000 5000
+
+// float data/gist/gist_base.fvecs data/gist/gist_query.fbin 5000 5000
+// float data/gist/gist_base.fvecs data/gist/gist_learn.fbin 100000

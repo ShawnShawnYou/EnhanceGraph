@@ -50,6 +50,19 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
      **************************************************************************/
 
   public:
+    DISKANN_DLLEXPORT void add_neighbor(location_t out_id, location_t in_id) {
+        _graph_store->add_neighbour(out_id, in_id);
+    }
+
+    DISKANN_DLLEXPORT float get_distance(location_t loc1, location_t loc2) {
+        return _data_store->get_distance(loc1, loc2);
+    }
+
+    DISKANN_DLLEXPORT float get_distance(T* query, location_t loc2) {
+        return _data_store->get_distance(query, loc2);
+    }
+
+
     // Call this when creating and passing Index Config is inconvenient.
     DISKANN_DLLEXPORT Index(Metric m, const size_t dim, const size_t max_points,
                             const std::shared_ptr<IndexWriteParameters> index_parameters,
@@ -128,6 +141,11 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search(const T *query, const size_t K, const uint32_t L,
                                                            IDType *indices, float *distances = nullptr);
 
+    template <typename IDType>
+    DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search_ret_route_sub(const T *query, const size_t K, const uint32_t L,
+                                                                         IDType *indices, std::vector<IDType>& route, float *distances);
+
+
     // Initialize space for res_vectors before calling.
     DISKANN_DLLEXPORT size_t search_with_tags(const T *query, const uint64_t K, const uint32_t L, TagT *tags,
                                               float *distances, std::vector<T *> &res_vectors);
@@ -196,6 +214,10 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
 
     virtual std::pair<uint32_t, uint32_t> _search(const DataType &query, const size_t K, const uint32_t L,
                                                   std::any &indices, float *distances = nullptr) override;
+
+    virtual std::pair<uint32_t, uint32_t> _search_ret_route(const DataType &query, const size_t K, const uint32_t L,
+                                                            std::any &indices, std::any &route, float *distances = nullptr) override;
+
     virtual std::pair<uint32_t, uint32_t> _search_with_filters(const DataType &query,
                                                                const std::string &filter_label_raw, const size_t K,
                                                                const uint32_t L, std::any &indices,

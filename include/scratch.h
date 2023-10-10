@@ -93,6 +93,9 @@ template <typename T> class InMemQueryScratch
     {
         return _occlude_list_output;
     }
+    inline std::vector<uint32_t> &route() {
+        return _route;
+    }
 
   private:
     uint32_t _L;
@@ -136,6 +139,8 @@ template <typename T> class InMemQueryScratch
     tsl::robin_set<uint32_t> _expanded_nodes_set;
     std::vector<Neighbor> _expanded_nghrs_vec;
     std::vector<uint32_t> _occlude_list_output;
+
+    std::vector<uint32_t> _route;
 };
 
 //

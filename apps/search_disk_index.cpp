@@ -446,6 +446,7 @@ int main(int argc, char **argv)
 
     try
     {
+        num_threads = 1;
         if (!query_filters.empty() && label_type == "ushort")
         {
             if (data_type == std::string("float"))

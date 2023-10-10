@@ -1214,6 +1214,7 @@ int build_disk_index(const char *dataFilePath, const char *indexFilePath, const 
         return -1;
     }
     uint32_t num_threads = (uint32_t)atoi(param_list[4].c_str());
+//    num_threads = 1;
 
     if (num_threads != 0)
     {

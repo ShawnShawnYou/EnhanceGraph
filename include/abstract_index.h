@@ -38,6 +38,12 @@ that can take any type(using std::any) and Provides a clean API that can be inhe
 class AbstractIndex
 {
   public:
+    virtual void add_neighbor(diskann::location_t out_id, diskann::location_t in_id) = 0;
+    virtual float get_distance(location_t loc1, location_t loc2) = 0;
+//    virtual float get_distance(DataType* query, location_t loc2) = 0;
+
+
+
     AbstractIndex() = default;
     virtual ~AbstractIndex() = default;
 
@@ -71,6 +77,12 @@ class AbstractIndex
     std::pair<uint32_t, uint32_t> search(const data_type *query, const size_t K, const uint32_t L, IDType *indices,
                                          float *distances = nullptr);
 
+
+    template <typename data_type, typename IDType>
+    std::pair<uint32_t, uint32_t> search_ret_route(const data_type *query, const size_t K, const uint32_t L,
+                                                   IDType *indices, std::vector<IDType>& route, float *distances = nullptr);
+
+
     // Filter support search
     // IndexType is either uint32_t or uint64_t
     template <typename IndexType>
@@ -100,6 +112,11 @@ class AbstractIndex
     virtual void _build(const DataType &data, const size_t num_points_to_load, TagVector &tags) = 0;
     virtual std::pair<uint32_t, uint32_t> _search(const DataType &query, const size_t K, const uint32_t L,
                                                   std::any &indices, float *distances = nullptr) = 0;
+
+    virtual std::pair<uint32_t, uint32_t> _search_ret_route(const DataType &query, const size_t K, const uint32_t L,
+                                                            std::any &indices, std::any &route, float *distances = nullptr) = 0;
+
+
     virtual std::pair<uint32_t, uint32_t> _search_with_filters(const DataType &query, const std::string &filter_label,
                                                                const size_t K, const uint32_t L, std::any &indices,
                                                                float *distances) = 0;
