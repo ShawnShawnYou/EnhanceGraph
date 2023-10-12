@@ -189,3 +189,4 @@ int main(int argc, char **argv)
 // --data_type float --dist_fn l2 --base_file data/random/random_learn.fbin --query_file  data/random/random_query.fbin --gt_file data/random/random_query_learn_gt100 --K 100
 // --data_type float --dist_fn l2 --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_query.fbin --gt_file data/gist/gist_query_learn_gt100 --K 100
 // --data_type float --dist_fn l2 --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_random_query.fbin --gt_file data/gist/gist_random_query_learn_gt100 --K 100
+// --data_type float --dist_fn l2 --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_random_train.fbin --gt_file data/gist/gist_random_train_learn_gt100 --K 100

@@ -84,11 +84,12 @@ void generate_random_dataset_fbin() {
 }
 
 
-void generate_random_data_based_on_origin(std::string original_data_path, std::string new_data_path,
+void generate_random_data_based_on_origin(std::string original_data_path, std::string new_data_path, std::string train_data_path,
                                           size_t jump_npts = 5000, size_t num_copy = 100, size_t num_base = 500) {
 
     std::ifstream reader(original_data_path, std::ios::binary | std::ios::ate);
     std::ofstream writer(new_data_path, std::ios::binary);
+    std::ofstream writer_train(train_data_path, std::ios::binary);
 
     size_t fsize = reader.tellg();
     reader.seekg(0, std::ios::beg);
@@ -107,7 +108,11 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
     size_t npts_generated = num_copy * num_base;
     writer.write((char *)&npts_generated, sizeof(int32_t));
     writer.write((char *)&ndims, sizeof(int32_t));
+    writer_train.write((char *)&npts_generated, sizeof(int32_t));
+    writer_train.write((char *)&ndims, sizeof(int32_t));
+
     float *write_buf = new float[npts_generated * ndims * datasize];
+    float *write_buf_train = new float[npts_generated * ndims * datasize];
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -123,18 +128,23 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
             for (int dim = 0; dim < ndims; dim++) {
                 data = *(query + dim) + dis(gen);
                 *(write_buf + (i * num_copy + j) * ndims + dim) = data;
+                data = *(query + dim) + dis(gen);
+                *(write_buf_train + (i * num_copy + j) * ndims + dim) = data;
             }
 
         }
 
     }
-    std::vector<float> test_vec(write_buf, write_buf + 2 * ndims);
+//    std::vector<float> test_vec(write_buf, write_buf + 2 * ndims);
     writer.write((char *)write_buf, npts_generated * ndims * sizeof(float));
+    writer_train.write((char *)write_buf_train, npts_generated * ndims * sizeof(float));
 
     delete[] write_buf;
+    delete[] write_buf_train;
     delete[] read_buf;
 
     writer.close();
+    writer_train.close();
     reader.close();
 }
 
@@ -142,7 +152,9 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
 
 int main(int argc, char **argv)
 {
-    generate_random_data_based_on_origin("data/gist/gist_base.fvecs", "data/gist/gist_random_query.fbin");
+    generate_random_data_based_on_origin("data/gist/gist_base.fvecs",
+                                         "data/gist/gist_random_query.fbin",
+                                         "data/gist/gist_random_train.fbin");
     return 0;
 //
 //    generate_random_dataset_fbin();
