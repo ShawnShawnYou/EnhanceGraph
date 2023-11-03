@@ -964,6 +964,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
         }
         cmps += (uint32_t)id_scratch.size();
 
+        // 注意：best_L_nodes是个固定大小的最大堆，只有当前的距离更小才会被加入进去？
         // Insert <id, dist> pairs into the pool of candidates
         for (size_t m = 0; m < id_scratch.size(); ++m)
         {

@@ -183,10 +183,26 @@ int main(int argc, char **argv)
 // --data_type float --dist_fn l2 --data_path data/sift/sift_learn.fbin --index_path_prefix data/sift/index_sift_learn_R32_L50_A1.2 -R 32 -L 50 --alpha 1.2
 // --data_type float --dist_fn l2 --data_path data/random/random_learn.fbin --index_path_prefix data/random/index_random_learn_R32_L50_A1.2 -R 32 -L 50 --alpha 1.2
 // --data_type float --dist_fn l2 --data_path data/gist/gist_learn.fbin --index_path_prefix data/gist/index_gist_learn_R32_L50_A1.2 -R 32 -L 50 --alpha 1.2
+// --data_type float --dist_fn cosine --data_path data/gist/gist_learn.fbin --index_path_prefix data/gist/index_gist_learn_R32_L50_A1.2_cosine -R 32 -L 50 --alpha 1.2
+
+// --data_type float --dist_fn l2 --data_path data/test/test_learn.fbin --index_path_prefix data/test/index_test_learn_R32_L50_A1.2 -R 32 -L 50 --alpha 1.2
+
+
 
 // compute gt
 // --data_type float --dist_fn l2 --base_file data/sift/sift_learn.fbin --query_file  data/sift/sift_query.fbin --gt_file data/sift/sift_query_learn_gt100 --K 100
+// --data_type float --dist_fn l2 --base_file data/sift/sift_learn.fbin --query_file  data/sift/sift_train.fbin --gt_file data/sift/sift_train_learn_gt100 --K 100
+
+
 // --data_type float --dist_fn l2 --base_file data/random/random_learn.fbin --query_file  data/random/random_query.fbin --gt_file data/random/random_query_learn_gt100 --K 100
+
 // --data_type float --dist_fn l2 --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_query.fbin --gt_file data/gist/gist_query_learn_gt100 --K 100
 // --data_type float --dist_fn l2 --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_random_query.fbin --gt_file data/gist/gist_random_query_learn_gt100 --K 100
 // --data_type float --dist_fn l2 --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_random_train.fbin --gt_file data/gist/gist_random_train_learn_gt100 --K 100
+
+// --data_type float --dist_fn cosine --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_query.fbin --gt_file data/gist/gist_query_learn_gt100_cosine --K 100
+// --data_type float --dist_fn cosine --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_random_query.fbin --gt_file data/gist/gist_random_query_learn_gt100_cosine --K 100
+// --data_type float --dist_fn cosine --base_file data/gist/gist_learn.fbin --query_file  data/gist/gist_random_train.fbin --gt_file data/gist/gist_random_train_learn_gt100_cosine --K 100
+
+// --data_type float --dist_fn l2 --base_file data/test/test_learn.fbin --query_file  data/test/test_query_train.fbin --gt_file data/test/test_query_train_learn_gt100 --K 100
+// --data_type float --dist_fn l2 --base_file data/test/test_learn.fbin --query_file  data/test/test_query.fbin --gt_file data/test/test_query_learn_gt100 --K 100

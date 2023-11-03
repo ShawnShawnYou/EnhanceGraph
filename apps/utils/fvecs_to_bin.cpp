@@ -152,10 +152,10 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
 
 int main(int argc, char **argv)
 {
-    generate_random_data_based_on_origin("data/gist/gist_base.fvecs",
-                                         "data/gist/gist_random_query.fbin",
-                                         "data/gist/gist_random_train.fbin");
-    return 0;
+//    generate_random_data_based_on_origin("data/gist/gist_base.fvecs",
+//                                         "data/gist/gist_random_query.fbin",
+//                                         "data/gist/gist_random_train.fbin");
+//    return 0;
 //
 //    generate_random_dataset_fbin();
 //    return 0;
@@ -196,13 +196,14 @@ int main(int argc, char **argv)
     // 先读取第一个向量的维数，再重置reader
 
     size_t npts = fsize / ((ndims * datasize) + sizeof(uint32_t));
+    std::cout << "Dataset: #pts = " << npts << ", # dims = " << ndims << std::endl;
+
     if (target_npts + jump_npts > npts) {
         std::cout << "Error: too much target and jump npts" << std::endl;
         exit(-1);
     }
     npts = std::min(npts, target_npts);
 
-    std::cout << "Dataset: #pts = " << npts << ", # dims = " << ndims << std::endl;
 
     size_t blk_size = 131072;   // todo: blk
     size_t nblks = ROUND_UP(npts, blk_size) / blk_size;
@@ -241,7 +242,16 @@ int main(int argc, char **argv)
     writer.close();
 }
 
-// float data/sift/sift_query.fvecs data/sift/sift_query.fbin 5000 5000
+// float data/sift/sift_query.fvecs data/sift/sift_query.fbin 5000 0
+// float data/sift/sift_query.fvecs data/sift/sift_train.fbin 5000 5000
+// float data/sift/sift_base.fvecs data/sift/sift_learn.fbin 100000
 
+
+// todo gist_base to query
 // float data/gist/gist_base.fvecs data/gist/gist_query.fbin 5000 5000
 // float data/gist/gist_base.fvecs data/gist/gist_learn.fbin 100000
+
+
+// float data/test/test_query.fvecs data/test/test_train.fbin 5000 0
+// float data/test/test_query.fvecs data/test/test_query.fbin 5000 5000
+// float data/test/test_learn.fvecs data/test/test_learn.fbin 100000

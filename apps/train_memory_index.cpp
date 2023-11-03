@@ -176,8 +176,23 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
                 }
 
                 if (is_train && test_id == 0) {
-                    if (our_nn_id != gt_nn_id)
+                    if (our_nn_id != gt_nn_id) {
                         add_edge_pairs.insert({our_nn_id, gt_nn_id});
+
+//                        std::cout <<
+//                        index->get_distance(gt_nn_id, i) << " " <<
+//                        index->get_distance(our_nn_id, i) << " " <<
+//                        index->get_distance(gt_nn_id, our_nn_id) << " " <<
+//                        std::endl;
+//                        for (int k = 0; k < recall_at; k++)
+//                            std::cout << query_result_ids[test_id][i * recall_at + k] << " ";
+//                        std::cout << std::endl;
+//                        for (int k = 0; k < recall_at; k++)
+//                            std::cout << int(query_result_dists[test_id][i * recall_at + k]) << " ";
+//                        std::cout << std::endl;
+//                        std::cout << std::endl;
+                    }
+
                 }
 
             }
@@ -257,6 +272,7 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
     }
 
 
+    print_route = false;
     for (auto pair : gt_nn_query_id_map) {
         auto group_nn_id = pair.first;
         if (pair.second.size() < 2)
@@ -308,7 +324,6 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
 
 
         /********** print route **********/
-        print_route = false;
         if (not find_flag and print_route) {
             print_route = false;
             std::cout << "gp nn id: " << group_nn_id << std::endl;
@@ -553,48 +568,64 @@ int search_memory_index(diskann::Metric &metric, const std::string &index_path, 
 
 
 
-int main() {
+int main(int argc, char **argv) {
     std::string data_type, dist_fn, index_path_prefix, trained_index_path_prefix, query_file, gt_file, filter_label,
     label_type, query_filters_file;
     uint32_t num_threads, K;
     std::vector<uint32_t> Lvec;
     std::vector<std::string> query_filters;
-    bool is_train, is_eval;
+    bool is_train, is_eval, is_validate;
 
-    std::string dataset = "gist";
+
+    std::string dataset = "test";
+    diskann::Metric metric = diskann::Metric::L2;
     is_train = false;
-    is_eval = true;
+    is_eval = false;
+    is_validate = false;
+
+    if (argc >= 2)
+        dataset = std::string(argv[1]);
+    if (argc >= 3) {
+        is_train = std::stoi(argv[2]) != 0;
+    }
+    if (argc >= 4) {
+        is_eval = std::stoi(argv[3]) != 0;
+    }
+    if (argc >= 5) {
+        is_validate = std::stoi(argv[4]) != 0;
+    }
 
     std::string data_prefix = "data/" + dataset;
     index_path_prefix = data_prefix + "/index_" + dataset + "_learn_R32_L50_A1.2";
 
-    dataset = "gist_random";
+//    dataset = "test";
     query_file = data_prefix + "/" + dataset + "_query.fbin";
     gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
     trained_index_path_prefix = data_prefix + "/index_" + dataset + "_train_R32_L50_A1.2";
 
-    if (is_eval) {
-        index_path_prefix = trained_index_path_prefix;
-        is_train = false;
-        query_file = data_prefix + "/" + dataset + "_query.fbin";
-        gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
-    }
     if (is_train) {
         query_file = data_prefix + "/" + dataset + "_train.fbin";
         gt_file = data_prefix + "/" + dataset + "_train_learn_gt100";
     }
+    if (is_eval or is_validate) {
+        index_path_prefix = trained_index_path_prefix;
+        is_train = false;
 
-    data_type = "float";
-    dist_fn = "l2";
+        if (is_eval) {
+            query_file = data_prefix + "/" + dataset + "_query.fbin";
+            gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
+        }
+        if (is_validate) {
+            query_file = data_prefix + "/" + dataset + "_train.fbin";
+            gt_file = data_prefix + "/" + dataset + "_train_learn_gt100";
+        }
+    }
+
     num_threads = 20;
     K = 10;
     Lvec.assign({50});
     if (not is_train)
         Lvec.assign({10, 20, 30, 40, 50, 100});
-
-    Lvec.assign({50});
-//    Lvec.assign({10, 20, 30, 40, 50, 100});
-    diskann::Metric metric = diskann::Metric::L2;
 
     same_node_test<float>(metric, index_path_prefix, trained_index_path_prefix, query_file, gt_file,
                                num_threads, K, Lvec,

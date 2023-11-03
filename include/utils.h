@@ -1041,6 +1041,8 @@ template <typename T> inline float get_norm(T *arr, const size_t dim)
 template <typename T = float> inline void normalize(T *arr, const size_t dim)
 {
     float norm = get_norm(arr, dim);
+    if (std::abs(norm) < 1e-9)
+        norm = 1;
     for (uint32_t i = 0; i < dim; i++)
     {
         arr[i] = (T)(arr[i] / norm);
