@@ -58,8 +58,14 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
         return _data_store->get_distance(loc1, loc2);
     }
 
-    DISKANN_DLLEXPORT float get_distance(T* query, location_t loc2) {
-        return _data_store->get_distance(query, loc2);
+    DISKANN_DLLEXPORT float get_distance(float* query, location_t loc2) {
+        return _data_store->get_distance((T*)query, loc2);
+    }
+
+
+
+    DISKANN_DLLEXPORT void init_knn_graph_store(std::unique_ptr<AbstractGraphStore> graph_store) {
+        _knn_graph_store = std::move(graph_store);
     }
 
 
@@ -269,6 +275,7 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
                                                          const std::vector<LabelT> &filters, bool search_invocation);
 
     void search_for_point_and_prune(int location, uint32_t Lindex, std::vector<uint32_t> &pruned_list,
+                                    std::vector<uint32_t> &original_list,
                                     InMemQueryScratch<T> *scratch, bool use_filter = false,
                                     uint32_t filteredLindex = 0);
 
@@ -349,6 +356,8 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
 
     // Graph related data structures
     std::unique_ptr<AbstractGraphStore> _graph_store;
+
+    std::unique_ptr<AbstractGraphStore> _knn_graph_store;
 
     char *_opt_graph = nullptr;
 

@@ -139,7 +139,7 @@ void normalize_data_file(const std::string &inFileName, const std::string &outFi
  * @return
  */
 double calculate_recall(uint32_t num_queries, uint32_t *gold_std, float *gs_dist, uint32_t dim_gs,
-                        uint32_t *our_results, uint32_t dim_or, uint32_t recall_at)
+                        uint32_t *our_results, uint32_t dim_or, uint32_t recall_at, uint32_t* shot_set)
 {
     double total_recall = 0;
     std::set<uint32_t> gt, res;
@@ -170,6 +170,7 @@ double calculate_recall(uint32_t num_queries, uint32_t *gold_std, float *gs_dist
             {
                 cur_recall++;
             }
+
         }
         total_recall += cur_recall;
     }

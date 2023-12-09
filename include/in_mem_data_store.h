@@ -49,6 +49,7 @@ template <typename data_t> class InMemDataStore : public AbstractDataStore<data_
                               const location_t num_points) override;
     virtual void copy_vectors(const location_t from_loc, const location_t to_loc, const location_t num_points) override;
 
+    virtual float get_distance(const data_t *query1, const data_t *query2) const override;
     virtual float get_distance(const data_t *query, const location_t loc) const override;
     virtual float get_distance(const location_t loc1, const location_t loc2) const override;
     virtual void get_distance(const data_t *query, const location_t *locations, const uint32_t location_count,

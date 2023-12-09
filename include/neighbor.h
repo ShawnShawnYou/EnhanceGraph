@@ -52,11 +52,11 @@ class NeighborPriorityQueue
     // set item or it has a greated distance than the final
     // item in the set. The set cursor that is used to pop() the
     // next item will be set to the lowest index of an uncheck item
-    void insert(const Neighbor &nbr)
+    bool insert(const Neighbor &nbr)
     {
         if (_size == _capacity && _data[_size - 1] < nbr)
         {
-            return;
+            return false;
         }
 
         size_t lo = 0, hi = _size;
@@ -70,7 +70,7 @@ class NeighborPriorityQueue
             }
             else if (_data[mid].id == nbr.id)
             {
-                return;
+                return false;
             }
             else
             {
@@ -91,6 +91,7 @@ class NeighborPriorityQueue
         {
             _cur = lo;
         }
+        return true;
     }
 
     Neighbor closest_unexpanded()

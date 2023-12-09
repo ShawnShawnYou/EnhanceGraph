@@ -75,6 +75,9 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
     index->load(index_path.c_str(), num_threads, *(std::max_element(Lvec.begin(), Lvec.end())));
 
 
+    std::string base_gt_file = "data/gist_random/gist_random_learn_learn_gt100";
+    diskann::load_truthset(base_gt_file, index->base_gt_ids, index->base_gt_dists, index->base_gt_num, index->base_gt_dim);
+
     if (print_all_recalls) {
         std::cout << "Using " << num_threads << " threads to search" << std::endl;
         std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
@@ -107,9 +110,24 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
     std::unordered_map<uint32_t, std::vector<uint32_t>> route_map;                  // key: query id    value: route
 
 
+    std::set<uint32_t> add_edge_ids_50;
+    uint32_t recall_10_true_f_bfs_10[query_num];
+    uint32_t recall_10_true_t_bfs_10[query_num];
+
+
     double best_recall = 0.0;
     for (uint32_t test_id = 0; test_id < Lvec.size(); test_id++) {
         uint32_t L = Lvec[test_id];
+
+//        if (test_id == 2) {
+//            index->use_bfs = true;
+//        }
+
+        index->inter_knng_final_count = 0;
+        index->inter_aknng_final_count = 0;
+        index->inter_knng2_final_count = 0;
+        index->add_success = 0;
+        index->valid_insert = 0;
 
         query_result_ids[test_id].resize(recall_at * query_num);
         query_result_dists[test_id].resize(recall_at * query_num);
@@ -144,12 +162,30 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
 
             diskann::location_t gt_nn_id = gt_id_vec_start[0];
             diskann::location_t our_nn_id = query_result_ids[test_id][i * recall_at];
-            float gt_nn_dist = gt_dist_vec_start[0];
-            float our_nn_dist = query_result_dists[test_id][i * recall_at];
+//            float gt_nn_dist = gt_dist_vec_start[0];
+//            float our_nn_dist = query_result_dists[test_id][i * recall_at];
 
-            //            std::vector<diskann::location_t> gt_id_vec(gt_id_vec_start,gt_id_vec_start + (uint32_t)recall_at);
-            //            std::vector<float> gt_dist_vec(gt_dist_vec_start,gt_dist_vec_start + (uint32_t)recall_at);
+            std::vector<diskann::location_t> gt_id_vec(gt_id_vec_start,gt_id_vec_start + (uint32_t)recall_at);
+            std::vector<float> gt_dist_vec(gt_dist_vec_start,gt_dist_vec_start + (uint32_t)recall_at);
 
+//            std::vector<diskann::location_t> base_gt_id_vec;
+//            std::vector<float> base_gt_dist_vec;
+//            index->get_base_gt_info(gt_nn_id, base_gt_id_vec, base_gt_dist_vec);
+//
+//            std::vector<float> query_knng_dist;
+//            for (int tmp_i = 0; tmp_i < recall_at; tmp_i++) {
+//                query_knng_dist.push_back(index->get_distance(query, base_gt_id_vec[tmp_i]));
+//            }
+//
+//            std::vector<float> gt_knng_dist;
+//            for (int tmp_i = 0; tmp_i < recall_at; tmp_i++) {
+//                gt_knng_dist.push_back(index->get_distance(gt_nn_id, base_gt_id_vec[tmp_i]));
+//            }
+//
+//            if (gt_knng_dist[9] > query_knng_dist[0])
+//                std::cout << "";
+//
+//            std::cout << "";
 
             #pragma omp critical
             {
@@ -164,20 +200,12 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
                     if (*(gt_dist_vec_start + 49) > max_distance) {
                         max_distance = *(gt_dist_vec_start + 49);
                     }
-                    //                if (our_nn_id == 9806) {
-                    //                    for (int k = 0; k < recall_at; k++)
-                    //                        std::cout << query_result_ids[test_id][i * recall_at + k] << " ";
-                    //                    std::cout << std::endl;
-                    //                    for (int k = 0; k < recall_at; k++)
-                    //                        std::cout << query_result_dists[test_id][i * recall_at + k] << " ";
-                    //                    std::cout << std::endl << std::endl;
-                    //                    our_nn_id = 9806;
-                    //                }
                 }
 
                 if (is_train && test_id == 0) {
                     if (our_nn_id != gt_nn_id) {
                         add_edge_pairs.insert({our_nn_id, gt_nn_id});
+                        add_edge_ids_50.insert(i);
 
 //                        std::cout <<
 //                        index->get_distance(gt_nn_id, i) << " " <<
@@ -221,10 +249,24 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
             std::vector<double> recalls;
 
             recalls.reserve(recalls_to_print);
+
+            uint32_t* shot_set = recall_10_true_f_bfs_10;
+//            if (test_id == 2)
+//                shot_set = recall_10_true_t_bfs_10;
+            std::cout <<
+            index->inter_knng_final_count / query_num << " " <<
+            index->inter_knng2_final_count / query_num << " " <<
+            index->inter_aknng_final_count / query_num << " " <<
+            index->add_success / query_num << " " <<
+            index->valid_insert / query_num << " " <<
+            std::endl;
+
+
             for (uint32_t curr_recall = first_recall; curr_recall <= recall_at; curr_recall++)
             {
                 recalls.push_back(diskann::calculate_recall((uint32_t)query_num, gt_ids, gt_dists, (uint32_t)gt_dim,
-                                                            query_result_ids[test_id].data(), recall_at, curr_recall));
+                                                            query_result_ids[test_id].data(), recall_at, curr_recall,
+                                                            shot_set));
             }
 
             std::sort(latency_stats.begin(), latency_stats.end());
@@ -252,6 +294,23 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path, const
 //        std::cout << "lid: " << lid << std::endl;
 
     }
+
+    /********** add edge combine BFS promotion **********/
+//    std::set<int> difference;
+//    for (int i = 0; i < query_num; i++) {
+//        if (recall_10_true_t_bfs_10[i] > recall_10_true_f_bfs_10[i])
+//            difference.insert(i);
+//    }
+//    std::set<int> intersection;
+//    std::set_intersection(difference.begin(), difference.end(),
+//                          add_edge_ids_50.begin(), add_edge_ids_50.end(),
+//                          std::inserter(intersection, intersection.end()));
+//    std::cout << difference.size() << std::endl;
+//    std::cout << difference.size() / (double)query_num << std::endl;
+//
+//    std::cout << intersection.size() << std::endl;
+//    std::cout << add_edge_ids_50.size() << std::endl;
+//    std::cout << (intersection.size() / (double)add_edge_ids_50.size()) << std::endl;
 
 
     /********** num of queries **********/
@@ -535,10 +594,11 @@ int search_memory_index(diskann::Metric &metric, const std::string &index_path, 
             std::vector<double> recalls;
 
             recalls.reserve(recalls_to_print);
+            uint32_t shot_set[10];
             for (uint32_t curr_recall = first_recall; curr_recall <= recall_at; curr_recall++)
             {
                 recalls.push_back(diskann::calculate_recall((uint32_t)query_num, gt_ids, gt_dists, (uint32_t)gt_dim,
-                                                            query_result_ids[test_id].data(), recall_at, curr_recall));
+                                                            query_result_ids[test_id].data(), recall_at, curr_recall, shot_set));
             }
 
             std::sort(latency_stats.begin(), latency_stats.end());
@@ -626,7 +686,7 @@ int main(int argc, char **argv) {
     Lvec.assign({50});
     if (not is_train)
         Lvec.assign({10, 20, 30, 40, 50, 100});
-
+//    Lvec.assign({50, 10, 10});
     same_node_test<float>(metric, index_path_prefix, trained_index_path_prefix, query_file, gt_file,
                                num_threads, K, Lvec,
                                is_train);

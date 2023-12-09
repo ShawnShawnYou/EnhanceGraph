@@ -38,9 +38,36 @@ that can take any type(using std::any) and Provides a clean API that can be inhe
 class AbstractIndex
 {
   public:
+    // setting
+    bool use_bfs = false;
+    bool use_knn_graph = false;
+    bool use_extra_search = false;
+
+    // count result
+    float inter_knng_final_count = 0;
+    float inter_aknng_final_count = 0;
+    float inter_knng2_final_count = 0;
+    float add_success = 0;
+    float valid_insert = 0;
+
+    // KNNG
+    uint32_t *base_gt_ids = nullptr;
+    float *base_gt_dists = nullptr;
+    size_t base_gt_num = 0, base_gt_dim = 0;
+
+
+    void get_base_gt_info(diskann::location_t base_id, std::vector<diskann::location_t>& gt_id_vec, std::vector<float>& gt_dist_vec) {
+        uint32_t *gt_id_vec_start = base_gt_ids + (uint32_t)base_gt_dim * base_id;
+        float* gt_dist_vec_start = base_gt_dists + (uint32_t)base_gt_dim * base_id;
+
+        gt_id_vec.assign(gt_id_vec_start, gt_id_vec_start + (uint32_t)base_gt_dim);
+        gt_dist_vec.assign(gt_dist_vec_start, gt_dist_vec_start + (uint32_t)base_gt_dim);
+    }
+
+
     virtual void add_neighbor(diskann::location_t out_id, diskann::location_t in_id) = 0;
     virtual float get_distance(location_t loc1, location_t loc2) = 0;
-//    virtual float get_distance(DataType* query, location_t loc2) = 0;
+    virtual float get_distance(float* query, location_t loc2) = 0;
 
 
 

@@ -236,6 +236,7 @@ template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, Labe
 // 4 byte uint32_t)
 template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, LabelT>::save_graph(std::string graph_file)
 {
+    _knn_graph_store->store(graph_file + "_knn", _nd + _num_frozen_pts, _num_frozen_pts, _start);
     return _graph_store->store(graph_file, _nd + _num_frozen_pts, _num_frozen_pts, _start);
 }
 
@@ -332,6 +333,7 @@ void Index<T, TagT, LabelT>::save(const char *filename, bool compact_before_save
         // the files are deleted before save. Ideally, we should check
         // the error code for delete_file, but will ignore now because
         // delete should succeed if save will succeed.
+        delete_file(graph_file + "_knn");
         delete_file(graph_file);
         save_graph(graph_file);
         delete_file(data_file);
@@ -652,6 +654,8 @@ size_t Index<T, TagT, LabelT>::load_graph(std::string filename, size_t expected_
 {
 #endif
     auto res = _graph_store->load(filename, expected_num_points);
+    auto res_knn = _knn_graph_store->load(filename + "_knn", expected_num_points);
+
     _start = std::get<1>(res);
     _num_frozen_pts = std::get<2>(res);
     return std::get<0>(res);
@@ -876,6 +880,8 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
     uint32_t hops = 0;
     uint32_t cmps = 0;
 
+    std::set<uint32_t> id_graph_scratch;
+
     while (best_L_nodes.has_unexpanded_node())
     {
         auto nbr = best_L_nodes.closest_unexpanded();
@@ -920,6 +926,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
                 if (is_not_visited(id))
                 {
                     id_scratch.push_back(id);
+                    id_graph_scratch.insert(id);
                 }
             }
 
@@ -971,12 +978,136 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
             best_L_nodes.insert(Neighbor(id_scratch[m], dist_scratch[m]));
         }
     }
+
+    if (use_knn_graph) {
+        std::vector<diskann::location_t> base_gt_id_vec;
+        std::vector<float> base_gt_dist_vec;
+        get_base_gt_info(best_L_nodes[0].id, base_gt_id_vec, base_gt_dist_vec);
+
+        bool count_inter = false;
+        if (count_inter) {
+            std::set<uint32_t> gt_knn;
+            for (int tmp_i = 0; tmp_i < 10; tmp_i++)
+                gt_knn.insert(base_gt_id_vec[tmp_i + 1]);
+
+            std::set<uint32_t> gt_aknn;
+            auto adj_list = _knn_graph_store->get_neighbours(best_L_nodes[0].id);
+            for (auto adj : adj_list) {
+                gt_aknn.insert(adj);
+            }
+
+            std::set<uint32_t> final_L;
+            for (int tmp_i = 0; tmp_i < 10; tmp_i++)
+                final_L.insert(best_L_nodes[tmp_i].id);
+
+
+            std::set<uint32_t> inter_aknng_final;
+            std::set_intersection(gt_aknn.begin(), gt_aknn.end(),
+                                  final_L.begin(), final_L.end(),
+                                  std::inserter(inter_aknng_final, inter_aknng_final.end()));
+
+            std::set<uint32_t> inter_knng_final;
+            std::set_intersection(gt_knn.begin(), gt_knn.end(),
+                                  final_L.begin(), final_L.end(),
+                                  std::inserter(inter_knng_final, inter_knng_final.end()));
+
+            std::set<uint32_t> inter_knng2_final;
+            std::set_intersection(gt_knn.begin(), gt_knn.end(),
+                                  gt_aknn.begin(), gt_aknn.end(),
+                                  std::inserter(inter_knng2_final, inter_knng2_final.end()));
+
+
+            inter_aknng_final_count += inter_aknng_final.size();
+            inter_knng_final_count += inter_knng_final.size();
+            inter_knng2_final_count += inter_knng2_final.size();
+        }
+
+        diskann::location_t our_best_nn_id = best_L_nodes[0].id;
+        auto adj_list = _knn_graph_store->get_neighbours(our_best_nn_id);
+
+//        for (auto adj : adj_list) {
+//            if (_data_store->get_distance(query, adj) < _data_store->get_distance(query, best_L_nodes[best_L_nodes.size() - 1].id)) {
+//            }
+//
+//            if (best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)))) {
+//                valid_insert ++;
+//            }
+//
+//        }
+
+
+        for (int tmp_i = 0; tmp_i < 15; tmp_i++) {
+            if (tmp_i >= base_gt_id_vec.size())
+                break;
+            if (best_L_nodes.insert(Neighbor(base_gt_id_vec[tmp_i + 1], get_distance((float*)query, base_gt_id_vec[tmp_i + 1])))) {
+                valid_insert ++;
+            };
+        }
+
+    }
+
+
+    if (use_bfs) {
+        int max_depth = 2;
+
+        id_scratch.clear();
+        dist_scratch.clear();
+
+        std::queue<std::pair<location_t, int>> to_be_bfs;
+
+        for (auto id : _graph_store->get_neighbours(best_L_nodes[0].id)) {
+            id_scratch.push_back(id);
+            to_be_bfs.push({id, 1});
+        }
+
+
+        while (not to_be_bfs.empty()) {
+            std::pair<location_t, int> node = to_be_bfs.front();
+            to_be_bfs.pop();
+
+            if (node.second == max_depth)
+                continue;
+
+            for (auto id : _graph_store->get_neighbours(node.first)) {
+                if (is_not_visited(id)) {
+                    id_scratch.push_back(id);
+                    to_be_bfs.push({id, node.second + 1});
+                }
+            }
+        }
+
+
+        for (auto id : id_scratch) {
+            if (fast_iterate) {
+                inserted_into_pool_bs[id] = 1;
+            } else {
+                inserted_into_pool_rs.insert(id);
+            }
+        }
+
+        for (size_t m = 0; m < id_scratch.size(); ++m) {
+            uint32_t id = id_scratch[m];
+
+            if (m + 1 < id_scratch.size()) {
+                auto nextn = id_scratch[m + 1];
+                _data_store->prefetch_vector(nextn);
+            }
+
+            dist_scratch.push_back(_data_store->get_distance(aligned_query, id));
+        }
+        cmps += (uint32_t) id_scratch.size();
+
+        for (size_t m = 0; m < id_scratch.size(); ++m) {
+            best_L_nodes.insert(Neighbor(id_scratch[m], dist_scratch[m]));
+        }
+    }
     return std::make_pair(hops, cmps);
 }
 
 template <typename T, typename TagT, typename LabelT>
 void Index<T, TagT, LabelT>::search_for_point_and_prune(int location, uint32_t Lindex,
                                                         std::vector<uint32_t> &pruned_list,
+                                                        std::vector<uint32_t> &original_list,
                                                         InMemQueryScratch<T> *scratch, bool use_filter,
                                                         uint32_t filteredLindex)
 {
@@ -1014,6 +1145,11 @@ void Index<T, TagT, LabelT>::search_for_point_and_prune(int location, uint32_t L
     {
         throw diskann::ANNException("ERROR: non-empty pruned_list passed", -1, __FUNCSIG__, __FILE__, __LINE__);
     }
+
+    for (int i = 0; i < 50 and i < scratch->best_l_nodes().size(); i++) {   // fixed bug: 不应该使用pool pool是无序的 没啥关系
+        original_list.push_back(scratch->best_l_nodes()[i].id);
+    }
+
 
     prune_neighbors(location, pool, pruned_list, scratch);
 
@@ -1270,29 +1406,63 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
         ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);  // multi-threads pop a scratch
         auto scratch = manager.scratch_space();
 
+        std::vector<uint32_t> original_list;
         std::vector<uint32_t> pruned_list;
         if (_filtered_index)
         {
-            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, scratch, _filtered_index,
+            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, original_list, scratch, _filtered_index,
                                        _filterIndexingQueueSize);
         }
         else
         {
-            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, scratch); // todo key
+            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, original_list, scratch); // todo key
         }
         {
             LockGuard guard(_locks[node]);
 
             _graph_store->set_neighbours(node, pruned_list);
+//            _knn_graph_store->set_neighbours(node, original_list);
             assert(_graph_store->get_neighbours((location_t)node).size() <= _indexingRange);
         }
 
-        inter_insert(node, pruned_list, scratch);   // todo key
+        inter_insert(node, pruned_list, scratch);   // todo key 这里是吧pruned_list里面的所有节点做一次判断和prune
 
         if (node_ctr % 100000 == 0)
         {
             diskann::cout << "\r" << (100.0 * node_ctr) / (visit_order.size()) << "% of index build completed."
                           << std::flush;
+        }
+    }
+
+
+    #pragma omp parallel for schedule(dynamic, 2048)
+    for (int64_t node_ctr = 0; node_ctr < (int64_t)(visit_order.size()); node_ctr++)
+    {
+        auto node = visit_order[node_ctr];
+
+        ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);  // multi-threads pop a scratch
+        auto scratch = manager.scratch_space();
+
+        std::vector<uint32_t> original_list;
+        std::vector<uint32_t> pruned_list;
+        if (_filtered_index)
+        {
+            search_for_point_and_prune(node, 100, pruned_list, original_list, scratch, _filtered_index,
+                                       _filterIndexingQueueSize);
+        }
+        else
+        {
+            search_for_point_and_prune(node, 100, pruned_list, original_list, scratch); // todo key
+        }
+        {
+            LockGuard guard(_locks[node]);
+            _knn_graph_store->set_neighbours(node, original_list);
+        }
+
+        if (node_ctr % 100000 == 0)
+        {
+            diskann::cout << "\r" << (100.0 * node_ctr) / (visit_order.size()) << "% of index build completed."
+            << std::flush;
         }
     }
 
@@ -2084,7 +2254,67 @@ DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search_r
     scratch->route().shrink_to_fit();
     /**********/
 
-    NeighborPriorityQueue &best_L_nodes = scratch->best_l_nodes();
+    NeighborPriorityQueue best_L_nodes;
+    best_L_nodes.reserve(L);
+
+
+    for (int tmp_i = 0; tmp_i < L; tmp_i++) {
+        best_L_nodes.insert(scratch->best_l_nodes()[tmp_i]);
+    }
+
+    float max_distance = 0, tmp_distance;
+    diskann::location_t p1 = 0, p2 = 10;
+//    for (int tmp_i = 0; tmp_i < 10; tmp_i++) {
+//
+//        for (int tmp_j = 0; tmp_j < 10; tmp_j++) {
+//            if (tmp_i == tmp_j)
+//                continue;
+//            tmp_distance = _data_store->get_distance(scratch->best_l_nodes()[tmp_i].id, scratch->best_l_nodes()[tmp_j].id);
+//            if (tmp_distance > max_distance){
+//                max_distance = tmp_distance;
+//                p1 = tmp_i;
+//                p2 = tmp_j;
+//            }
+//        }
+//    }
+    p1 = 0; p2 = 0;
+
+    if (use_extra_search) {
+        T* query_1 = (T*) malloc(_data_store->get_dims() * sizeof(T));
+        _data_store->get_data(query_1, scratch->best_l_nodes()[p1].id);
+
+        T* query_2 = (T*) malloc(_data_store->get_dims() * sizeof(T));
+        _data_store->get_data(query_2, scratch->best_l_nodes()[p2].id);
+
+        int insert_success = 0;
+
+        scratch->clear();
+        _data_store->get_dist_fn()->preprocess_query(query_1, _data_store->get_dims(), scratch->aligned_query());
+        auto retval_1 =
+                iterate_to_fixed_point(query, L, {best_L_nodes[p2].id}, scratch, false, unused_filter_label, true);
+
+        for (int tmp_i = 0; tmp_i < L; tmp_i++) {
+            diskann::location_t id = scratch->best_l_nodes()[tmp_i].id;
+            if (best_L_nodes.insert(Neighbor(id, _data_store->get_distance(query, id))))
+                insert_success++;
+        }
+
+        scratch->clear();
+        _data_store->get_dist_fn()->preprocess_query(query_2, _data_store->get_dims(), scratch->aligned_query());
+        retval_1 =
+                iterate_to_fixed_point(query, L, {best_L_nodes[p1].id}, scratch, false, unused_filter_label, true);
+        for (int tmp_i = 0; tmp_i < L; tmp_i++) {
+            diskann::location_t id = scratch->best_l_nodes()[tmp_i].id;
+            if (best_L_nodes.insert(Neighbor(id, _data_store->get_distance(query, id))))
+                insert_success++;
+        }
+
+
+        add_success += insert_success;
+        free(query_1);
+        free(query_2);
+    }
+
 
     size_t pos = 0;
     for (size_t i = 0; i < best_L_nodes.size(); ++i)
@@ -2949,13 +3179,14 @@ int Index<T, TagT, LabelT>::insert_point(const T *point, const TagT tag)
     ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);
     auto scratch = manager.scratch_space();
     std::vector<uint32_t> pruned_list;
+    std::vector<uint32_t> original_list;
     if (_filtered_index)
     {
-        search_for_point_and_prune(location, _indexingQueueSize, pruned_list, scratch, true, _filterIndexingQueueSize);
+        search_for_point_and_prune(location, _indexingQueueSize, pruned_list, original_list, scratch, true, _filterIndexingQueueSize);
     }
     else
     {
-        search_for_point_and_prune(location, _indexingQueueSize, pruned_list, scratch);
+        search_for_point_and_prune(location, _indexingQueueSize, pruned_list, original_list, scratch);
     }
     {
         std::shared_lock<std::shared_timed_mutex> tlock(_tag_lock, std::defer_lock);

@@ -39,30 +39,40 @@ void generate_random_dataset_fbin() {
     std::string random_data_bin_dir = "/app/DiskANN/build/data/random";
     std::string random_learn_path = random_data_bin_dir + "/random_learn.fbin";
     std::string random_query_path = random_data_bin_dir + "/random_query.fbin";
+    std::string random_train_path = random_data_bin_dir + "/random_train.fbin";
 
     std::ofstream learn_writer(random_learn_path, std::ios::binary);
     std::ofstream query_writer(random_query_path, std::ios::binary);
+    std::ofstream train_writer(random_train_path, std::ios::binary);
 
     uint32_t chunk = 1;
-    uint32_t data_dim = 128;
+    uint32_t data_dim = 256;
     size_t learn_data_size = 100000;
     size_t query_data_size = 10000;
+    size_t train_data_size = 10000;
 
     float *learn_write_buf = new float[chunk * data_dim * learn_data_size];
     float *query_write_buf = new float[chunk * data_dim * query_data_size];
+    float *train_write_buf = new float[chunk * data_dim * train_data_size];
 
     std::default_random_engine generator(std::time(nullptr));
-    std::uniform_real_distribution<float> distribution(0.0f, 50.0f);
+    std::uniform_real_distribution<float> distribution(0.0f, 10.0f);
 
     for (int i = 0; i < learn_data_size; ++i) {
         for (int j = 0; j < data_dim; ++j) {
-            learn_write_buf[i + j] = distribution(generator);
+            learn_write_buf[i * data_dim + j] = distribution(generator);
         }
     }
 
     for (int i = 0; i < query_data_size; ++i) {
         for (int j = 0; j < data_dim; ++j) {
-            query_write_buf[i + j] = distribution(generator);
+            query_write_buf[i * data_dim + j] = distribution(generator);
+        }
+    }
+
+    for (int i = 0; i < train_data_size; ++i) {
+        for (int j = 0; j < data_dim; ++j) {
+            train_write_buf[i * data_dim + j] = distribution(generator);
         }
     }
 
@@ -74,9 +84,15 @@ void generate_random_dataset_fbin() {
     query_writer.write((char *)&data_dim, sizeof(int32_t));
     query_writer.write((char *)query_write_buf, query_data_size * data_dim * sizeof(float));
 
+    train_writer.write((char *)&train_data_size, sizeof(int32_t));
+    train_writer.write((char *)&data_dim, sizeof(int32_t));
+    train_writer.write((char *)train_write_buf, train_data_size * data_dim * sizeof(float));
+
     delete[] learn_write_buf;
     delete[] query_write_buf;
+    delete[] train_write_buf;
 
+    train_writer.close();
     query_writer.close();
     learn_writer.close();
 
@@ -85,7 +101,7 @@ void generate_random_dataset_fbin() {
 
 
 void generate_random_data_based_on_origin(std::string original_data_path, std::string new_data_path, std::string train_data_path,
-                                          size_t jump_npts = 5000, size_t num_copy = 100, size_t num_base = 500) {
+                                          size_t jump_npts = 40000, size_t num_copy = 5, size_t num_base = 10000) {
 
     std::ifstream reader(original_data_path, std::ios::binary | std::ios::ate);
     std::ofstream writer(new_data_path, std::ios::binary);
@@ -116,7 +132,7 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
 
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(-0.005, 0.005);    // gist: 0.0 - 0.01
+    std::uniform_real_distribution<> dis(-0.01, 0.01);    // gist: 0.0 - 0.01
 
 
     for (int i = 0; i < num_base; i++) {
@@ -152,10 +168,10 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
 
 int main(int argc, char **argv)
 {
-//    generate_random_data_based_on_origin("data/gist/gist_base.fvecs",
-//                                         "data/gist/gist_random_query.fbin",
-//                                         "data/gist/gist_random_train.fbin");
-//    return 0;
+    generate_random_data_based_on_origin("data/gist_random/gist_random_learn.fvecs",
+                                         "data/gist_random/gist_random_query.fbin",
+                                         "data/gist_random/gist_random_train.fbin");
+    return 0;
 //
 //    generate_random_dataset_fbin();
 //    return 0;
@@ -255,3 +271,6 @@ int main(int argc, char **argv)
 // float data/test/test_query.fvecs data/test/test_train.fbin 5000 0
 // float data/test/test_query.fvecs data/test/test_query.fbin 5000 5000
 // float data/test/test_learn.fvecs data/test/test_learn.fbin 100000
+
+// float data/test/test_query.fvecs data/test/test_train.fbin 5000 0
+// float data/test/test_query.fvecs data/test/test_query.fbin 5000 5000

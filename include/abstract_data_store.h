@@ -81,7 +81,7 @@ template <typename data_t> class AbstractDataStore
     virtual void copy_vectors(const location_t from_loc, const location_t to_loc, const location_t num_points) = 0;
 
     // metric specific operations
-
+    virtual float get_distance(const data_t *query1, const data_t *query2) const = 0;
     virtual float get_distance(const data_t *query, const location_t loc) const = 0;
     virtual void get_distance(const data_t *query, const location_t *locations, const uint32_t location_count,
                               float *distances) const = 0;

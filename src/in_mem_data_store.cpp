@@ -363,6 +363,11 @@ template <typename data_t> Distance<data_t> *InMemDataStore<data_t>::get_dist_fn
     return this->_distance_fn.get();
 }
 
+template<typename data_t>
+float InMemDataStore<data_t>::get_distance(const data_t *query1, const data_t *query2) const {
+    return _distance_fn->compare(query1, query2, (uint32_t)this->_aligned_dim);
+}
+
 template DISKANN_DLLEXPORT class InMemDataStore<float>;
 template DISKANN_DLLEXPORT class InMemDataStore<int8_t>;
 template DISKANN_DLLEXPORT class InMemDataStore<uint8_t>;
