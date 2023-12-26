@@ -148,7 +148,7 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
                                                            IDType *indices, float *distances = nullptr);
 
     template <typename IDType>
-    DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search_ret_route_sub(const T *query, const size_t K, const uint32_t L,
+    DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> search_ret_route_sub(int64_t i, const T *query, const size_t K, const uint32_t L,
                                                                          IDType *indices, std::vector<IDType>& route, float *distances);
 
 
@@ -221,7 +221,7 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     virtual std::pair<uint32_t, uint32_t> _search(const DataType &query, const size_t K, const uint32_t L,
                                                   std::any &indices, float *distances = nullptr) override;
 
-    virtual std::pair<uint32_t, uint32_t> _search_ret_route(const DataType &query, const size_t K, const uint32_t L,
+    virtual std::pair<uint32_t, uint32_t> _search_ret_route(int64_t i, const DataType &query, const size_t K, const uint32_t L,
                                                             std::any &indices, std::any &route, float *distances = nullptr) override;
 
     virtual std::pair<uint32_t, uint32_t> _search_with_filters(const DataType &query,

@@ -40,8 +40,14 @@ class AbstractIndex
   public:
     // setting
     bool use_bfs = false;
-    bool use_knn_graph = false;
+    bool use_knn_graph = true;
     bool use_extra_search = false;
+    bool use_cached_top1 = false;
+
+    // build setting
+    int AKNNG_R = 32;   // AKNNG degree limit R
+    int AKNNG_L = 100;   // AKNNG build search parameter L
+    bool is_random_select_aknng_neighbor = false;
 
     // count result
     float inter_knng_final_count = 0;
@@ -54,6 +60,8 @@ class AbstractIndex
     uint32_t *base_gt_ids = nullptr;
     float *base_gt_dists = nullptr;
     size_t base_gt_num = 0, base_gt_dim = 0;
+    size_t gt_dim = -1;
+    uint32_t *gt_ids = nullptr;
 
 
     void get_base_gt_info(diskann::location_t base_id, std::vector<diskann::location_t>& gt_id_vec, std::vector<float>& gt_dist_vec) {
@@ -106,7 +114,7 @@ class AbstractIndex
 
 
     template <typename data_type, typename IDType>
-    std::pair<uint32_t, uint32_t> search_ret_route(const data_type *query, const size_t K, const uint32_t L,
+    std::pair<uint32_t, uint32_t> search_ret_route(int64_t i, const data_type *query, const size_t K, const uint32_t L,
                                                    IDType *indices, std::vector<IDType>& route, float *distances = nullptr);
 
 
@@ -140,7 +148,7 @@ class AbstractIndex
     virtual std::pair<uint32_t, uint32_t> _search(const DataType &query, const size_t K, const uint32_t L,
                                                   std::any &indices, float *distances = nullptr) = 0;
 
-    virtual std::pair<uint32_t, uint32_t> _search_ret_route(const DataType &query, const size_t K, const uint32_t L,
+    virtual std::pair<uint32_t, uint32_t> _search_ret_route(int64_t i, const DataType &query, const size_t K, const uint32_t L,
                                                             std::any &indices, std::any &route, float *distances = nullptr) = 0;
 
 

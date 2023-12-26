@@ -93,7 +93,7 @@ def pipeline():
     h5py_file_path = "/app/DiskANN/build/data/test/test.h5"
     base_size = 100000
     query_size = 10000
-    dataset = "test"
+    dataset = "gist_random"
     work_dir = "/app/DiskANN/build/"
 
 
@@ -121,6 +121,10 @@ def pipeline():
     param_fvecs_to_bin_learn = "float" + " " + learn_fvecs + " " + learn_fbin + " " + str(base_size)
     param_fvecs_to_bin_query = "float" + " " + query_fvecs + " " + query_fbin + " " + str(int(query_size / 2)) + " " + str(0)
     param_fvecs_to_bin_train = "float" + " " + query_fvecs + " " + train_fbin + " " + str(int(query_size / 2)) + " " + str(int(query_size / 2))
+
+    # param_fvecs_to_bin_learn = "float" + " " + learn_fvecs + " " + learn_fbin + " " + str(base_size) + " " + str(10000)
+    # param_fvecs_to_bin_query = "float" + " " + learn_fvecs + " " + query_fbin + " " + str(int(query_size / 2)) + " " + str(10000)
+    # param_fvecs_to_bin_train = "float" + " " + learn_fvecs + " " + train_fbin + " " + str(int(query_size / 2)) + " " + str(10000 + int(query_size / 2))
 
 
     app_compute_gt = app_path_prefix + "utils/compute_groundtruth"
@@ -161,25 +165,27 @@ def pipeline():
     print("Finish Phase 1")
 
     # 2. fvecs to fbin
-    os.system(app_fvecs_to_bin + " " + param_fvecs_to_bin_learn)
-    os.system(app_fvecs_to_bin + " " + param_fvecs_to_bin_query)
-    os.system(app_fvecs_to_bin + " " + param_fvecs_to_bin_train)
+    # os.system(app_fvecs_to_bin + " " + param_fvecs_to_bin_learn)
+    # os.system(app_fvecs_to_bin + " " + param_fvecs_to_bin_query)
+    # os.system(app_fvecs_to_bin + " " + param_fvecs_to_bin_train)
     print("Finish Phase 2")
 
     # 3. compute gt
-    os.system(app_compute_gt + " " + param_compute_gt_query)
-    os.system(app_compute_gt + " " + param_compute_gt_train)
+    # os.system(app_compute_gt + " " + param_compute_gt_query)
+    # print(app_compute_gt + " " + param_compute_gt_query)
+    # os.system(app_compute_gt + " " + param_compute_gt_train)
     print("Finish Phase 3")
 
     # 4. build index
     os.system(app_build_index + " " + param_build_index)
+    print(app_build_index + " " + param_build_index)
     print("Finish Phase 4")
 
     # 5. train and query
-    os.system(app_train + " " + param_train)
-    os.system(app_train + " " + param_valid)
-    os.system(app_train + " " + param_query)
-    os.system(app_train + " " + param_eval)
+    # os.system(app_train + " " + param_train)
+    # os.system(app_train + " " + param_valid)
+    # os.system(app_train + " " + param_query)
+    # os.system(app_train + " " + param_eval)
     print("Finish Phase 5")
 
 

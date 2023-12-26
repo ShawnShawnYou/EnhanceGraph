@@ -979,12 +979,18 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
         }
     }
 
+    if (use_cached_top1) {
+        uint32_t *gt_id_vec_start = gt_ids + (uint32_t)gt_dim * scratch->i;
+        diskann::location_t gt_nn_id = gt_id_vec_start[0];
+        best_L_nodes.insert(Neighbor(gt_nn_id, _data_store->get_distance(aligned_query, gt_nn_id)));
+    }
+
     if (use_knn_graph) {
         std::vector<diskann::location_t> base_gt_id_vec;
         std::vector<float> base_gt_dist_vec;
         get_base_gt_info(best_L_nodes[0].id, base_gt_id_vec, base_gt_dist_vec);
 
-        bool count_inter = false;
+        bool count_inter = true;
         if (count_inter) {
             std::set<uint32_t> gt_knn;
             for (int tmp_i = 0; tmp_i < 10; tmp_i++)
@@ -1025,24 +1031,24 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
         diskann::location_t our_best_nn_id = best_L_nodes[0].id;
         auto adj_list = _knn_graph_store->get_neighbours(our_best_nn_id);
 
-//        for (auto adj : adj_list) {
-//            if (_data_store->get_distance(query, adj) < _data_store->get_distance(query, best_L_nodes[best_L_nodes.size() - 1].id)) {
-//            }
-//
-//            if (best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)))) {
-//                valid_insert ++;
-//            }
-//
-//        }
+        for (auto adj : adj_list) {
+            if (_data_store->get_distance(query, adj) < _data_store->get_distance(query, best_L_nodes[best_L_nodes.size() - 1].id)) {
+            }
 
-
-        for (int tmp_i = 0; tmp_i < 15; tmp_i++) {
-            if (tmp_i >= base_gt_id_vec.size())
-                break;
-            if (best_L_nodes.insert(Neighbor(base_gt_id_vec[tmp_i + 1], get_distance((float*)query, base_gt_id_vec[tmp_i + 1])))) {
+            if (best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)))) {
                 valid_insert ++;
-            };
+            }
+
         }
+
+
+//        for (int tmp_i = 0; tmp_i < 15; tmp_i++) {
+//            if (tmp_i >= base_gt_id_vec.size())
+//                break;
+//            if (best_L_nodes.insert(Neighbor(base_gt_id_vec[tmp_i + 1], get_distance((float*)query, base_gt_id_vec[tmp_i + 1])))) {
+//                valid_insert ++;
+//            };
+//        }
 
     }
 
@@ -1146,8 +1152,25 @@ void Index<T, TagT, LabelT>::search_for_point_and_prune(int location, uint32_t L
         throw diskann::ANNException("ERROR: non-empty pruned_list passed", -1, __FUNCSIG__, __FILE__, __LINE__);
     }
 
-    for (int i = 0; i < 50 and i < scratch->best_l_nodes().size(); i++) {   // fixed bug: 不应该使用pool pool是无序的 没啥关系
-        original_list.push_back(scratch->best_l_nodes()[i].id);
+
+    if (is_random_select_aknng_neighbor) {
+        std::vector<int> indices(scratch->best_l_nodes().size());
+        std::iota(indices.begin(), indices.end(), 0);
+
+        std::random_device rd;
+        std::mt19937 g(rd());
+
+        std::shuffle(indices.begin(), indices.end(), g);
+
+        indices.resize(AKNNG_R);
+
+        for (int i : indices) {
+            original_list.push_back(scratch->best_l_nodes()[i].id);
+        }
+    } else {
+        for (int i = 0; i < AKNNG_R and i < scratch->best_l_nodes().size(); i++) {   // fixed bug: 不应该使用pool pool是无序的 没啥关系
+            original_list.push_back(scratch->best_l_nodes()[i].id);
+        }
     }
 
 
@@ -1447,12 +1470,12 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
         std::vector<uint32_t> pruned_list;
         if (_filtered_index)
         {
-            search_for_point_and_prune(node, 100, pruned_list, original_list, scratch, _filtered_index,
+            search_for_point_and_prune(node, AKNNG_L, pruned_list, original_list, scratch, _filtered_index,
                                        _filterIndexingQueueSize);
         }
         else
         {
-            search_for_point_and_prune(node, 100, pruned_list, original_list, scratch); // todo key
+            search_for_point_and_prune(node, AKNNG_L, pruned_list, original_list, scratch); // todo key
         }
         {
             LockGuard guard(_locks[node]);
@@ -2097,7 +2120,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::_search(const DataType &qu
 
 
 template <typename T, typename TagT, typename LabelT>
-std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::_search_ret_route(const DataType &query, const size_t K, const uint32_t L,
+std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::_search_ret_route(int64_t i, const DataType &query, const size_t K, const uint32_t L,
                                                                         std::any &indices, std::any &route, float *distances)
 {
     try
@@ -2107,7 +2130,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::_search_ret_route(const Da
         {
             auto u32_ptr = std::any_cast<uint32_t *>(indices);
             auto u32_ptr_route = std::any_cast<std::vector<uint32_t>>(route);
-            auto ret = this->search_ret_route_sub(typed_query, K, L, u32_ptr, u32_ptr_route, distances);
+            auto ret = this->search_ret_route_sub(i, typed_query, K, L, u32_ptr, u32_ptr_route, distances);
             route = u32_ptr_route;
             return ret;
 
@@ -2116,7 +2139,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::_search_ret_route(const Da
         {
             auto u64_ptr = std::any_cast<uint64_t *>(indices);
             auto u64_ptr_route = std::any_cast<std::vector<uint64_t>>(route);
-            auto ret = this->search_ret_route_sub(typed_query, K, L, u64_ptr, u64_ptr_route, distances);
+            auto ret = this->search_ret_route_sub(i, typed_query, K, L, u64_ptr, u64_ptr_route, distances);
             route = u64_ptr_route;
             return ret;
         }
@@ -2218,7 +2241,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search(const T *query, con
 
 template <typename T, typename TagT, typename LabelT>
 template <typename IDType>
-DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search_ret_route_sub(const T *query, const size_t K, const uint32_t L,
+DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search_ret_route_sub(int64_t i, const T *query, const size_t K, const uint32_t L,
                                                                                              IDType *indices, std::vector<IDType>& route, float *distances)
 {
     if (K > (uint64_t)L)
@@ -2228,6 +2251,7 @@ DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search_r
 
     ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);
     auto scratch = manager.scratch_space();
+    scratch->i = i;
 
     if (L > scratch->get_L())
     {
