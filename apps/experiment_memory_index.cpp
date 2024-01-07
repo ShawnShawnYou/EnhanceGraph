@@ -29,14 +29,15 @@
 #include "utils.h"
 #include "program_options_utils.hpp"
 #include "index_factory.h"
+//#include "../apps/utils/compute_groundtruth.cpp"
 
 
 
 template <typename T, typename LabelT = uint32_t>
-        int same_node_test(diskann::Metric &metric, const std::string &index_path, const std::string &trained_index_path,
+        int same_node_test(diskann::Metric &metric, const std::string &index_path,
                            const std::string &query_file, const std::string &truthset_file, const uint32_t num_threads,
                            const uint32_t recall_at, const std::vector<uint32_t> &Lvec,
-                           const bool is_train) {
+                           const bool is_train, const bool use_cached_top1) {
 
     // dim and num
     using TagT = uint32_t;
@@ -113,6 +114,185 @@ template <typename T, typename LabelT = uint32_t>
     std::unordered_map<uint32_t, std::vector<uint32_t>> route_map;                  // key: query id    value: route
 
 
+
+
+    bool is_calculate_middle = true;
+    if (is_calculate_middle) {
+        // 根据50个topk的结果来生成query，每个topk生成10个
+        // 500个结果看看能收敛到哪里
+
+        int test_base_size = 10000;
+        int topk_num = 5;
+        int top_k_start = 0;
+        std::vector<float> delta_list = {0.51, 0.6, 0.7, 0.8, 0.9, 1};
+        //    delta_list.assign({0, 1});
+        //    delta_list.assign({0.1, 0.2, 0.3, 0.4, 0.49});
+        delta_list.assign({0.51});
+
+        bool calculate_gt = false;
+
+        size_t test_query_num = test_base_size * topk_num;
+
+        for (auto delta : delta_list) {
+            diskann::location_t* base_ids = new diskann::location_t[query_aligned_dim * test_query_num];
+            diskann::location_t* topk_ids = new diskann::location_t[query_aligned_dim * test_query_num];
+
+            // generate test data
+            float* test_query = new float[query_aligned_dim * test_query_num];
+
+            for (int i = 0; i < test_base_size; i++) {
+                int base_id = i + 10000;
+                uint32_t *base_gt_id_start = index->base_gt_ids + base_id * index->base_gt_dim + 1;
+                float* base_data = new float[query_aligned_dim];
+                index->get_data(base_data, base_id);
+
+                for (int k = 0; k < topk_num; k++) {
+                    diskann::location_t topk_id = base_gt_id_start[k + top_k_start];
+                    float* topk_data = new float[query_aligned_dim];
+                    index->get_data(topk_data, topk_id);
+
+                    float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
+                    base_ids[i * topk_num + k] = base_id;
+                    topk_ids[i * topk_num + k] = topk_id;
+
+                    for (int d = 0; d < query_aligned_dim; d++) {
+                        test_query_start[d] = delta * base_data[d] + (1 - delta) * topk_data[d];
+                    }
+
+                    delete[] topk_data;
+                }
+
+                delete[] base_data;
+            }
+
+
+            // calculate global optimal
+            if (calculate_gt and index->base_gt_num < 100000) {
+                std::vector<uint32_t> location_to_tag;
+                std::string base_file = "/app/DiskANN/build/data/gist_random/gist_random_learn.fbin";
+                size_t base_size = 90000;
+                size_t k = 10;
+                std::vector<std::vector<std::pair<uint32_t, float>>> results;
+//                results = processUnfilteredParts<T>(base_file, test_query_num, base_size, query_aligned_dim, k, test_query, metric,  location_to_tag);
+
+
+                float count_base_equal_gt = 0;
+                float count_topk_equal_gt = 0;
+                for (int i = 0; i < test_query_num; i++) {
+                    diskann::location_t base_id = base_ids[i];
+                    diskann::location_t topk_id = topk_ids[i];
+                    diskann::location_t converage_id = results[i][0].first;
+                    if (converage_id == base_id) {
+                        count_base_equal_gt ++;
+                    } else if (converage_id == topk_id) {
+                        count_topk_equal_gt ++;
+                    }
+                }
+
+                std::cout <<
+                count_base_equal_gt / (double) test_query_num << " " <<
+                count_topk_equal_gt / (double) test_query_num << std::endl;
+
+                delete[] base_ids;
+                delete[] topk_ids;
+            }
+
+            // query
+            int shot_base = 0;
+            int shot_topk = 0;
+            int shot_other = 0;
+
+            int rank_shot_base = 0;
+            int rank_shot_topk = 0;
+            int rank_shot_other = 0;
+
+            float distance2base_shot_base = 0;
+            float distance2base_shot_topk = 0;
+            float distance2base_shot_other = 0;
+
+            float avg_distance2base = 0;
+
+            omp_set_num_threads(20);
+    #pragma omp parallel for schedule(dynamic, 1)
+            for (int i = 0; i < test_base_size; i++)  {
+                int base_id = i + 10000;
+                uint32_t *base_gt_id_start = index->base_gt_ids + base_id * index->base_gt_dim + 1;
+
+                for (int k = 0; k < topk_num; k++) {
+                    diskann::location_t topk_id = base_gt_id_start[k + top_k_start];
+
+                    float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
+
+                    std::vector<uint32_t> test_query_result_ids(recall_at);
+                    std::vector<float> test_query_result_dists(recall_at);
+                    std::vector<uint32_t> route;
+                    int L = 50;
+
+                    index->search_ret_route(
+                            i,
+                            test_query_start,
+                            recall_at,
+                            L,
+                            test_query_result_ids.data(),
+                            route,
+                            test_query_result_dists.data()
+                            );
+
+                    int local_optimum = test_query_result_ids[0];
+
+                    avg_distance2base += index->get_distance(test_query_start, base_id);
+                    if (local_optimum == base_id) {
+                        shot_base++;
+                        rank_shot_base += k;
+                        distance2base_shot_base += index->get_distance(test_query_start, base_id);
+                    }
+                    else if (local_optimum == topk_id) {
+                        shot_topk++;
+                        rank_shot_topk += k;
+                        distance2base_shot_topk += index->get_distance(test_query_start, base_id);
+                    }
+                    else {
+                        shot_other++;
+                        rank_shot_other += k;
+                        distance2base_shot_other += index->get_distance(test_query_start, base_id);
+
+                    }
+                }
+            }
+
+            std::cout << delta << std::endl;
+            std::cout << avg_distance2base / (double)test_query_num << " " << std::endl;
+
+            std::cout
+            << shot_base / (double)test_query_num << " "
+            << shot_topk / (double)test_query_num << " "
+            << shot_other / (double)test_query_num
+            << std::endl;
+
+            std::cout
+            << rank_shot_base / (double)test_query_num << " "
+            << rank_shot_topk / (double)test_query_num << " "
+            << rank_shot_other / (double)test_query_num
+            << std::endl;
+
+            std::cout
+            << distance2base_shot_base / (double)test_query_num << " "
+            << distance2base_shot_topk / (double)test_query_num << " "
+            << distance2base_shot_other / (double)test_query_num
+            << std::endl;
+
+            std::cout << std::endl;
+
+            delete[] test_query;
+        }
+
+        return 0;
+
+
+        query_num = test_base_size;
+    }
+
+
     double best_recall = 0.0;
     for (uint32_t test_id = 0; test_id < Lvec.size(); test_id++) {
         uint32_t L = Lvec[test_id];
@@ -138,6 +318,8 @@ template <typename T, typename LabelT = uint32_t>
             auto qs = std::chrono::high_resolution_clock::now();
 
             std::vector<uint32_t> route;
+
+//            index->get_data(query + i * query_aligned_dim, );
 
 
             cmp_stats[i] = index->search_ret_route(
@@ -199,7 +381,7 @@ template <typename T, typename LabelT = uint32_t>
                 index->add_neighbor(p.first, p.second);
             add_edge_pairs.clear();
 
-            index->save(trained_index_path.c_str(), false);
+            index->save(index_path.c_str(), false);
         }
 
         if (print_all_recalls) {
@@ -257,11 +439,8 @@ template <typename T, typename LabelT = uint32_t>
 
 
 
-
-
-
 int main(int argc, char **argv) {
-    std::string data_type, dist_fn, index_path_prefix, trained_index_path_prefix, query_file, gt_file, filter_label,
+    std::string data_type, dist_fn, index_path_prefix, query_file, gt_file, filter_label,
     label_type, query_filters_file;
     uint32_t num_threads, K;
     std::vector<uint32_t> Lvec;
@@ -290,27 +469,15 @@ int main(int argc, char **argv) {
     std::string data_prefix = "data/" + dataset;
     index_path_prefix = data_prefix + "/index_" + dataset + "_learn_R32_L50_A1.2";
 
-    //    dataset = "test";
     query_file = data_prefix + "/" + dataset + "_query.fbin";
     gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
-    trained_index_path_prefix = data_prefix + "/index_" + dataset + "_train_R32_L50_A1.2";
 
-    if (is_train) {
+    if (is_train or is_validate) {
         query_file = data_prefix + "/" + dataset + "_train.fbin";
         gt_file = data_prefix + "/" + dataset + "_train_learn_gt100";
-    }
-    if (is_eval or is_validate) {
-        index_path_prefix = trained_index_path_prefix;
-        is_train = false;
-
-        if (is_eval) {
-            query_file = data_prefix + "/" + dataset + "_query.fbin";
-            gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
-        }
-        if (is_validate) {
-            query_file = data_prefix + "/" + dataset + "_train.fbin";
-            gt_file = data_prefix + "/" + dataset + "_train_learn_gt100";
-        }
+    } else if (is_eval) {
+        query_file = data_prefix + "/" + dataset + "_query.fbin";
+        gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
     }
 
     num_threads = 20;
@@ -318,12 +485,14 @@ int main(int argc, char **argv) {
     Lvec.assign({50});
     if (not is_train)
         Lvec.assign({10, 20, 30, 40, 50, 100});
-
     std::filesystem::path new_path("/app/DiskANN/build");
     std::filesystem::current_path(new_path);
     std::filesystem::path  cwd = std::filesystem::current_path();
     std::cout << cwd << std::endl;
-    same_node_test<float>(metric, index_path_prefix, trained_index_path_prefix, query_file, gt_file,
+    //    Lvec.assign({50, 50});
+    //    std::filesystem::path cwd = std::filesystem::current_path();
+    //    std::cout << cwd << std::endl;
+    same_node_test<float>(metric, index_path_prefix, query_file, gt_file,
                           num_threads, K, Lvec,
-                          is_train);
+                          is_train, is_validate or is_eval);
 }

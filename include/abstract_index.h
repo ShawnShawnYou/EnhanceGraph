@@ -41,8 +41,10 @@ class AbstractIndex
     // setting
     bool use_bfs = false;
     bool use_knn_graph = true;
+    bool use_many_knn_graph = false;
     bool use_extra_search = false;
-    bool use_cached_top1 = false;
+    bool use_cached_top1 = true;
+
 
     // build setting
     int AKNNG_R = 32;   // AKNNG degree limit R
@@ -72,8 +74,11 @@ class AbstractIndex
         gt_dist_vec.assign(gt_dist_vec_start, gt_dist_vec_start + (uint32_t)base_gt_dim);
     }
 
+    virtual void get_data(float* data, diskann::location_t id) = 0;
+
 
     virtual void add_neighbor(diskann::location_t out_id, diskann::location_t in_id) = 0;
+    virtual void add_neighbor_top1(location_t out_id, location_t in_id) = 0;
     virtual float get_distance(location_t loc1, location_t loc2) = 0;
     virtual float get_distance(float* query, location_t loc2) = 0;
 

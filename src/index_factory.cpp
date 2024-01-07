@@ -101,9 +101,13 @@ std::unique_ptr<AbstractIndex> IndexFactory::create_instance()
         construct_graphstore(_config->graph_strategy, num_points + _config->num_frozen_pts, max_reserve_degree);
     auto knn_graph_store =
             construct_graphstore(_config->graph_strategy, num_points + _config->num_frozen_pts, max_reserve_degree);
+    auto top1_graph_store =
+            construct_graphstore(_config->graph_strategy, num_points + _config->num_frozen_pts, max_reserve_degree);
+
     auto ret = std::make_unique<diskann::Index<data_type, tag_type, label_type>>(*_config, std::move(data_store),
                                                                              std::move(graph_store));
     ret->init_knn_graph_store(std::move(knn_graph_store));
+    ret->init_top1_graph_store(std::move(top1_graph_store));
 
     return ret;
 }

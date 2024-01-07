@@ -54,6 +54,10 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
         _graph_store->add_neighbour(out_id, in_id);
     }
 
+    DISKANN_DLLEXPORT void add_neighbor_top1(location_t out_id, location_t in_id) {
+        _top1_graph_store->add_neighbour(out_id, in_id);
+    }
+
     DISKANN_DLLEXPORT float get_distance(location_t loc1, location_t loc2) {
         return _data_store->get_distance(loc1, loc2);
     }
@@ -62,12 +66,18 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
         return _data_store->get_distance((T*)query, loc2);
     }
 
+    DISKANN_DLLEXPORT void get_data(float* data, location_t id) {
+        _data_store->get_data((T*)data, id);
+    }
 
 
     DISKANN_DLLEXPORT void init_knn_graph_store(std::unique_ptr<AbstractGraphStore> graph_store) {
         _knn_graph_store = std::move(graph_store);
     }
 
+    DISKANN_DLLEXPORT void init_top1_graph_store(std::unique_ptr<AbstractGraphStore> graph_store) {
+        _top1_graph_store = std::move(graph_store);
+    }
 
     // Call this when creating and passing Index Config is inconvenient.
     DISKANN_DLLEXPORT Index(Metric m, const size_t dim, const size_t max_points,
@@ -358,6 +368,8 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     std::unique_ptr<AbstractGraphStore> _graph_store;
 
     std::unique_ptr<AbstractGraphStore> _knn_graph_store;
+
+    std::unique_ptr<AbstractGraphStore> _top1_graph_store;
 
     char *_opt_graph = nullptr;
 

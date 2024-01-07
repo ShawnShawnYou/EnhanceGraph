@@ -101,7 +101,7 @@ void generate_random_dataset_fbin() {
 
 
 void generate_random_data_based_on_origin(std::string original_data_path, std::string new_data_path, std::string train_data_path,
-                                          size_t jump_npts = 40000, size_t num_copy = 5, size_t num_base = 10000) {
+                                          size_t jump_npts = 10000, size_t num_copy = 5, size_t num_base = 10000) {
 
     std::ifstream reader(original_data_path, std::ios::binary | std::ios::ate);
     std::ofstream writer(new_data_path, std::ios::binary);
@@ -168,9 +168,9 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
 
 int main(int argc, char **argv)
 {
-    generate_random_data_based_on_origin("data/gist_random/gist_random_learn.fvecs",
-                                         "data/gist_random/gist_random_query.fbin",
-                                         "data/gist_random/gist_random_train.fbin");
+    generate_random_data_based_on_origin("data/gist1m/gist1m_base.fvecs",
+                                         "data/gist1m/gist1m_query.fbin",
+                                         "data/gist1m/gist1m_train.fbin");
     return 0;
 //
 //    generate_random_dataset_fbin();

@@ -236,6 +236,7 @@ template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, Labe
 // 4 byte uint32_t)
 template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, LabelT>::save_graph(std::string graph_file)
 {
+    _top1_graph_store->store(graph_file + "_top1", _nd + _num_frozen_pts, _num_frozen_pts, _start);
     _knn_graph_store->store(graph_file + "_knn", _nd + _num_frozen_pts, _num_frozen_pts, _start);
     return _graph_store->store(graph_file, _nd + _num_frozen_pts, _num_frozen_pts, _start);
 }
@@ -334,6 +335,7 @@ void Index<T, TagT, LabelT>::save(const char *filename, bool compact_before_save
         // the error code for delete_file, but will ignore now because
         // delete should succeed if save will succeed.
         delete_file(graph_file + "_knn");
+        delete_file(graph_file + "_top1");
         delete_file(graph_file);
         save_graph(graph_file);
         delete_file(data_file);
@@ -655,6 +657,7 @@ size_t Index<T, TagT, LabelT>::load_graph(std::string filename, size_t expected_
 #endif
     auto res = _graph_store->load(filename, expected_num_points);
     auto res_knn = _knn_graph_store->load(filename + "_knn", expected_num_points);
+    auto res_top1 = _top1_graph_store->load(filename + "_top1", expected_num_points);
 
     _start = std::get<1>(res);
     _num_frozen_pts = std::get<2>(res);
@@ -980,17 +983,20 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
     }
 
     if (use_cached_top1) {
-        uint32_t *gt_id_vec_start = gt_ids + (uint32_t)gt_dim * scratch->i;
-        diskann::location_t gt_nn_id = gt_id_vec_start[0];
-        best_L_nodes.insert(Neighbor(gt_nn_id, _data_store->get_distance(aligned_query, gt_nn_id)));
+        diskann::location_t our_best_nn_id = best_L_nodes[0].id;
+        auto top1_adj_list = _top1_graph_store->get_neighbours(our_best_nn_id);
+
+        for (auto adj : top1_adj_list) {
+            best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)));
+        }
     }
 
     if (use_knn_graph) {
         std::vector<diskann::location_t> base_gt_id_vec;
         std::vector<float> base_gt_dist_vec;
-        get_base_gt_info(best_L_nodes[0].id, base_gt_id_vec, base_gt_dist_vec);
+//        get_base_gt_info(best_L_nodes[0].id, base_gt_id_vec, base_gt_dist_vec);
 
-        bool count_inter = true;
+        bool count_inter = false;
         if (count_inter) {
             std::set<uint32_t> gt_knn;
             for (int tmp_i = 0; tmp_i < 10; tmp_i++)
@@ -1052,6 +1058,24 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
 
     }
 
+
+    if (use_many_knn_graph) {
+        int how_many_knn_graph = 10;
+        for (int tmp_i = 0; tmp_i < how_many_knn_graph; tmp_i++) {
+            std::vector<diskann::location_t> base_gt_id_vec;
+            std::vector<float> base_gt_dist_vec;
+            get_base_gt_info(best_L_nodes[tmp_i].id, base_gt_id_vec, base_gt_dist_vec);
+
+            diskann::location_t our_best_nn_id = best_L_nodes[tmp_i].id;
+            auto adj_list = _knn_graph_store->get_neighbours(our_best_nn_id);
+
+            for (auto adj : adj_list) {
+                best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)));
+            }
+        }
+
+
+    }
 
     if (use_bfs) {
         int max_depth = 2;
