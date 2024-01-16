@@ -172,10 +172,10 @@ std::tuple<uint32_t, uint32_t, size_t> InMemGraphStore::load_impl(const std::str
         uint32_t k;
         in.read((char *)&k, sizeof(uint32_t));
 
-        if (k == 0)
-        {
-            diskann::cerr << "ERROR: Point found with no out-neighbours, point#" << nodes_read << std::endl;
-        }
+//        if (k == 0)
+//        {
+//            diskann::cerr << "ERROR: Point found with no out-neighbours, point#" << nodes_read << std::endl;
+//        }
 
         cc += k;
         ++nodes_read;

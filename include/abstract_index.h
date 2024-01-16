@@ -59,23 +59,24 @@ class AbstractIndex
     float valid_insert = 0;
 
     // KNNG
-    uint32_t *base_gt_ids = nullptr;
-    float *base_gt_dists = nullptr;
-    size_t base_gt_num = 0, base_gt_dim = 0;
-    size_t gt_dim = -1;
-    uint32_t *gt_ids = nullptr;
-
-
-    void get_base_gt_info(diskann::location_t base_id, std::vector<diskann::location_t>& gt_id_vec, std::vector<float>& gt_dist_vec) {
-        uint32_t *gt_id_vec_start = base_gt_ids + (uint32_t)base_gt_dim * base_id;
-        float* gt_dist_vec_start = base_gt_dists + (uint32_t)base_gt_dim * base_id;
-
-        gt_id_vec.assign(gt_id_vec_start, gt_id_vec_start + (uint32_t)base_gt_dim);
-        gt_dist_vec.assign(gt_dist_vec_start, gt_dist_vec_start + (uint32_t)base_gt_dim);
-    }
+//    uint32_t *base_gt_ids = nullptr;
+//    float *base_gt_dists = nullptr;
+//    size_t base_gt_num = 0, base_gt_dim = 0;
+//    size_t gt_dim = -1;
+//    uint32_t *gt_ids = nullptr;
+//
+//
+//    void get_base_gt_info(diskann::location_t base_id, std::vector<diskann::location_t>& gt_id_vec, std::vector<float>& gt_dist_vec) {
+//        uint32_t *gt_id_vec_start = base_gt_ids + (uint32_t)base_gt_dim * base_id;
+//        float* gt_dist_vec_start = base_gt_dists + (uint32_t)base_gt_dim * base_id;
+//
+//        gt_id_vec.assign(gt_id_vec_start, gt_id_vec_start + (uint32_t)base_gt_dim);
+//        gt_dist_vec.assign(gt_dist_vec_start, gt_dist_vec_start + (uint32_t)base_gt_dim);
+//    }
 
     virtual void get_data(float* data, diskann::location_t id) = 0;
 
+    virtual const std::vector<diskann::location_t> &get_aknng_neighbors(location_t id) = 0;
 
     virtual void add_neighbor(diskann::location_t out_id, diskann::location_t in_id) = 0;
     virtual void add_neighbor_top1(location_t out_id, location_t in_id) = 0;

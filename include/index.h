@@ -50,6 +50,10 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
      **************************************************************************/
 
   public:
+    const std::vector<diskann::location_t> & get_aknng_neighbors(location_t id) {
+        return _knn_graph_store->get_neighbours(id);
+    }
+
     DISKANN_DLLEXPORT void add_neighbor(location_t out_id, location_t in_id) {
         _graph_store->add_neighbour(out_id, in_id);
     }

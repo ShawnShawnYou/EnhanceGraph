@@ -1059,23 +1059,23 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
     }
 
 
-    if (use_many_knn_graph) {
-        int how_many_knn_graph = 10;
-        for (int tmp_i = 0; tmp_i < how_many_knn_graph; tmp_i++) {
-            std::vector<diskann::location_t> base_gt_id_vec;
-            std::vector<float> base_gt_dist_vec;
-            get_base_gt_info(best_L_nodes[tmp_i].id, base_gt_id_vec, base_gt_dist_vec);
-
-            diskann::location_t our_best_nn_id = best_L_nodes[tmp_i].id;
-            auto adj_list = _knn_graph_store->get_neighbours(our_best_nn_id);
-
-            for (auto adj : adj_list) {
-                best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)));
-            }
-        }
-
-
-    }
+//    if (use_many_knn_graph) {
+//        int how_many_knn_graph = 10;
+//        for (int tmp_i = 0; tmp_i < how_many_knn_graph; tmp_i++) {
+//            std::vector<diskann::location_t> base_gt_id_vec;
+//            std::vector<float> base_gt_dist_vec;
+//            get_base_gt_info(best_L_nodes[tmp_i].id, base_gt_id_vec, base_gt_dist_vec);
+//
+//            diskann::location_t our_best_nn_id = best_L_nodes[tmp_i].id;
+//            auto adj_list = _knn_graph_store->get_neighbours(our_best_nn_id);
+//
+//            for (auto adj : adj_list) {
+//                best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)));
+//            }
+//        }
+//
+//
+//    }
 
     if (use_bfs) {
         int max_depth = 2;

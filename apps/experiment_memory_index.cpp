@@ -55,7 +55,6 @@ template <typename T, typename LabelT = uint32_t>
     const std::string qps_title = show_qps_per_thread ? "QPS/thread" : "QPS";
     const uint32_t first_recall = print_all_recalls ? 1 : recall_at;
 
-
     // load data, gt, index
     diskann::load_aligned_bin<T>(query_file, query, query_num, query_dim, query_aligned_dim);
 
@@ -74,31 +73,7 @@ template <typename T, typename LabelT = uint32_t>
     auto index_factory = diskann::IndexFactory(config);
     auto index = index_factory.create_instance();
     index->load(index_path.c_str(), num_threads, *(std::max_element(Lvec.begin(), Lvec.end())));
-
-
-    std::string base_gt_file = "data/gist_random/gist_random_learn_learn_gt100";
-    diskann::load_truthset(base_gt_file, index->base_gt_ids, index->base_gt_dists, index->base_gt_num, index->base_gt_dim);
-
-    index->gt_ids = gt_ids;
-    index->gt_dim = gt_dim;
-
-    if (print_all_recalls) {
-        std::cout << "Using " << num_threads << " threads to search" << std::endl;
-        std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
-        std::cout.precision(2);
-        std::cout << std::setw(4) << "Ls" << std::setw(12) << qps_title << std::setw(18) << "Avg dist cmps"
-        << std::setw(20) << "Mean Latency (mus)" << std::setw(15) << "99.9 Latency";
-        table_width += 4 + 12 + 18 + 20 + 15;
-        for (uint32_t curr_recall = first_recall; curr_recall <= recall_at; curr_recall++)
-        {
-            std::cout << std::setw(12) << ("Recall@" + std::to_string(curr_recall));
-        }
-        recalls_to_print = recall_at + 1 - first_recall;
-        table_width += recalls_to_print * 12;
-        std::cout << std::endl;
-        std::cout << std::string(table_width, '=') << std::endl;
-    }
-
+    index->use_cached_top1 = use_cached_top1;
 
     // start query
     std::vector<std::vector<uint32_t>> query_result_ids(Lvec.size());
@@ -114,15 +89,13 @@ template <typename T, typename LabelT = uint32_t>
     std::unordered_map<uint32_t, std::vector<uint32_t>> route_map;                  // key: query id    value: route
 
 
-
-
     bool is_calculate_middle = true;
     if (is_calculate_middle) {
         // 根据50个topk的结果来生成query，每个topk生成10个
         // 500个结果看看能收敛到哪里
 
         int test_base_size = 10000;
-        int topk_num = 5;
+        int topk_num = 32;
         int top_k_start = 0;
         std::vector<float> delta_list = {0.51, 0.6, 0.7, 0.8, 0.9, 1};
         //    delta_list.assign({0, 1});
@@ -142,12 +115,15 @@ template <typename T, typename LabelT = uint32_t>
 
             for (int i = 0; i < test_base_size; i++) {
                 int base_id = i + 10000;
-                uint32_t *base_gt_id_start = index->base_gt_ids + base_id * index->base_gt_dim + 1;
+                auto adj_list = index->get_aknng_neighbors(base_id);
+
                 float* base_data = new float[query_aligned_dim];
                 index->get_data(base_data, base_id);
 
+                assert(topk_num - 1 + top_k_start < adj_list.size());
+
                 for (int k = 0; k < topk_num; k++) {
-                    diskann::location_t topk_id = base_gt_id_start[k + top_k_start];
+                    diskann::location_t topk_id = adj_list[k + top_k_start];
                     float* topk_data = new float[query_aligned_dim];
                     index->get_data(topk_data, topk_id);
 
@@ -167,7 +143,7 @@ template <typename T, typename LabelT = uint32_t>
 
 
             // calculate global optimal
-            if (calculate_gt and index->base_gt_num < 100000) {
+            if (calculate_gt) {
                 std::vector<uint32_t> location_to_tag;
                 std::string base_file = "/app/DiskANN/build/data/gist_random/gist_random_learn.fbin";
                 size_t base_size = 90000;
@@ -212,14 +188,19 @@ template <typename T, typename LabelT = uint32_t>
 
             float avg_distance2base = 0;
 
+            float count_add_edges = 0;
+            std::set<std::pair<diskann::location_t, diskann::location_t>> add_edges;
+
             omp_set_num_threads(20);
     #pragma omp parallel for schedule(dynamic, 1)
             for (int i = 0; i < test_base_size; i++)  {
                 int base_id = i + 10000;
-                uint32_t *base_gt_id_start = index->base_gt_ids + base_id * index->base_gt_dim + 1;
+                auto adj_list = index->get_aknng_neighbors(base_id);
+
+                assert(topk_num - 1 + top_k_start < adj_list.size());
 
                 for (int k = 0; k < topk_num; k++) {
-                    diskann::location_t topk_id = base_gt_id_start[k + top_k_start];
+                    diskann::location_t topk_id = adj_list[k + top_k_start];
 
                     float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
 
@@ -239,6 +220,14 @@ template <typename T, typename LabelT = uint32_t>
                             );
 
                     int local_optimum = test_query_result_ids[0];
+
+
+                    if (local_optimum != base_id) {
+                        #pragma omp critical
+                        {
+                            add_edges.insert({local_optimum, base_id});
+                        }
+                    }
 
                     avg_distance2base += index->get_distance(test_query_start, base_id);
                     if (local_optimum == base_id) {
@@ -260,8 +249,15 @@ template <typename T, typename LabelT = uint32_t>
                 }
             }
 
+            for (auto p : add_edges) {
+                index->add_neighbor_top1(p.first, p.second);
+                count_add_edges++;
+            }
+
+
             std::cout << delta << std::endl;
             std::cout << avg_distance2base / (double)test_query_num << " " << std::endl;
+            std::cout << count_add_edges / (double)test_base_size << " " << std::endl;
 
             std::cout
             << shot_base / (double)test_query_num << " "
@@ -285,11 +281,25 @@ template <typename T, typename LabelT = uint32_t>
 
             delete[] test_query;
         }
+    }
 
-        return 0;
 
 
-        query_num = test_base_size;
+    if (print_all_recalls) {
+        std::cout << "Using " << num_threads << " threads to search" << std::endl;
+        std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
+        std::cout.precision(2);
+        std::cout << std::setw(4) << "Ls" << std::setw(12) << qps_title << std::setw(18) << "Avg dist cmps"
+        << std::setw(20) << "Mean Latency (mus)" << std::setw(15) << "99.9 Latency";
+        table_width += 4 + 12 + 18 + 20 + 15;
+        for (uint32_t curr_recall = first_recall; curr_recall <= recall_at; curr_recall++)
+        {
+            std::cout << std::setw(12) << ("Recall@" + std::to_string(curr_recall));
+        }
+        recalls_to_print = recall_at + 1 - first_recall;
+        table_width += recalls_to_print * 12;
+        std::cout << std::endl;
+        std::cout << std::string(table_width, '=') << std::endl;
     }
 
 
@@ -318,10 +328,6 @@ template <typename T, typename LabelT = uint32_t>
             auto qs = std::chrono::high_resolution_clock::now();
 
             std::vector<uint32_t> route;
-
-//            index->get_data(query + i * query_aligned_dim, );
-
-
             cmp_stats[i] = index->search_ret_route(
                     i,
                     query + i * query_aligned_dim,
@@ -361,27 +367,11 @@ template <typename T, typename LabelT = uint32_t>
                     }
                 }
 
-                if (is_train && test_id == 0 && not index->use_cached_top1) {
-                    if (our_nn_id != gt_nn_id) {
-                        add_edge_pairs.insert({our_nn_id, gt_nn_id});
-
-                    }
-
-                }
-
             }
 
             auto qe = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> diff = qe - qs;
             latency_stats[i] = (float)(diff.count() * 1000000);
-        }
-
-        if (is_train && test_id == 0) {
-            for (auto p : add_edge_pairs)
-                index->add_neighbor(p.first, p.second);
-            add_edge_pairs.clear();
-
-            index->save(index_path.c_str(), false);
         }
 
         if (print_all_recalls) {
@@ -397,14 +387,6 @@ template <typename T, typename LabelT = uint32_t>
             recalls.reserve(recalls_to_print);
 
             uint32_t shot_set[query_num];
-
-//            std::cout <<
-//            index->inter_knng_final_count / query_num << " " <<
-//            index->inter_knng2_final_count / query_num << " " <<
-//            index->inter_aknng_final_count / query_num << " " <<
-//            index->add_success / query_num << " " <<
-//            index->valid_insert / query_num << " " <<
-//            std::endl;
 
 
             for (uint32_t curr_recall = first_recall; curr_recall <= recall_at; curr_recall++)
