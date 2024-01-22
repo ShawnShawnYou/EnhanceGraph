@@ -90,7 +90,7 @@ template <typename T, typename LabelT = uint32_t>
 
 
     bool is_calculate_middle = true;
-    if (is_calculate_middle) {
+    if (is_calculate_middle and use_cached_top1) {
         // 根据50个topk的结果来生成query，每个topk生成10个
         // 500个结果看看能收敛到哪里
 
