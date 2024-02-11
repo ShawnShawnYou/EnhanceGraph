@@ -100,7 +100,8 @@ void generate_random_dataset_fbin() {
 }
 
 
-void generate_random_data_based_on_origin(std::string original_data_path, std::string new_data_path, std::string train_data_path,
+void generate_random_data_based_on_origin(std::string dataset,
+                                          std::string original_data_path, std::string new_data_path, std::string train_data_path,
                                           size_t jump_npts = 10000, size_t num_copy = 5, size_t num_base = 10000) {
 
     std::ifstream reader(original_data_path, std::ios::binary | std::ios::ate);
@@ -130,10 +131,31 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
     float *write_buf = new float[npts_generated * ndims * datasize];
     float *write_buf_train = new float[npts_generated * ndims * datasize];
 
+
+
+    int sampled_base_num = 100000;
+    float avg_dim = 0;
+    for (int i = 0; i < sampled_base_num; i++) {
+        float* query = ((float*)read_buf + (i) * (ndims + 1)) + 1;
+
+        float tmp = 0;
+        for (int dim = 0; dim < ndims; dim++) {
+            tmp += *(query + dim);
+        }
+        avg_dim += (tmp / (float)ndims);
+    }
+    avg_dim /= sampled_base_num;
+
+    if (dataset == "gist1m") {
+        avg_dim /= 20.0;    // += 5%
+    } else if (dataset == "sift1m") {
+        avg_dim /= 10.0;    // += 20%
+    }
+
+
     std::random_device rd;
     std::mt19937 gen(rd());
-    std::uniform_real_distribution<> dis(-0.01, 0.01);    // gist: 0.0 - 0.01
-
+    std::uniform_real_distribution<> dis(-1 * avg_dim, avg_dim);
 
     for (int i = 0; i < num_base; i++) {
         float* query = ((float*)read_buf + (i + jump_npts) * (ndims + 1)) + 1;
@@ -168,9 +190,19 @@ void generate_random_data_based_on_origin(std::string original_data_path, std::s
 
 int main(int argc, char **argv)
 {
-    generate_random_data_based_on_origin("data/gist1m/gist1m_base.fvecs",
-                                         "data/gist1m/gist1m_query.fbin",
-                                         "data/gist1m/gist1m_train.fbin");
+    std::string data_dir, dataset, query_file, base_file, train_file;
+
+    data_dir = "/root/xiaoyao_zhong/dataset/data";
+    dataset = "sift1m";
+
+
+    query_file = data_dir + "/" + dataset + "/" + dataset + "_query.fbin";
+    train_file = data_dir + "/" + dataset + "/" + dataset + "_train.fbin";
+    base_file = data_dir + "/" + dataset + "/" + dataset + "_base.fvecs";
+    generate_random_data_based_on_origin(dataset,
+                                         base_file,
+                                         query_file,
+                                         train_file);
     return 0;
 //
 //    generate_random_dataset_fbin();

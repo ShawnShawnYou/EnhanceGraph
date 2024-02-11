@@ -33,6 +33,9 @@ const char *SEARCH_LIST_DESCRIPTION =
     "to L in the DiskANN white paper.";
 const char *INPUT_DATA_PATH = "Input data file in bin format.  This is the file you want to build the index over.  "
                               "File format:  Shape of the vector followed by the vector of embeddings as binary data.";
+const char *INPUT_ALGORITHM_NAME = "Input algorithm name: TAUMNG / VAMANA / NSG";
+
+const char *INPUT_DATASET_NAME = "Input dataset name: GIST, SIFT...";
 
 // Optional parameters
 const char *FILTER_LABEL_DESCRIPTION =

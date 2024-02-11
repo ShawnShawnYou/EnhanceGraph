@@ -1198,7 +1198,36 @@ void Index<T, TagT, LabelT>::search_for_point_and_prune(int location, uint32_t L
     }
 
 
-    prune_neighbors(location, pool, pruned_list, scratch);
+    if (strategy != TAUMNG) {
+        prune_neighbors(location, pool, pruned_list, scratch);
+    } else {
+        std::vector<Neighbor> backup_pool(pool);
+        std::unordered_set<location_t> already_neighbors(pruned_list.begin(), pruned_list.end());
+
+        for (auto candidate : backup_pool) {
+            if (already_neighbors.find(candidate.id) != already_neighbors.end())
+                continue;
+
+            if (candidate.distance < tau) {
+                pruned_list.push_back(candidate.id);
+                already_neighbors.insert(candidate.id);
+            }
+
+            bool is_add_edge = true;
+            for (auto neighbor_id : pruned_list) {
+                bool condition_1 = get_distance(location, neighbor_id) < candidate.distance;
+                bool condition_2 = get_distance(candidate.id, neighbor_id) < candidate.distance - 3 * tau;
+                if (condition_1 and condition_2) {
+                    is_add_edge = false;
+                    break;
+                }
+            }
+            if (is_add_edge) {
+                pruned_list.push_back(candidate.id);
+                already_neighbors.insert(candidate.id);
+            }
+        }
+    }
 
     assert(!pruned_list.empty());
     assert(_graph_store->get_total_points() == _max_points + _num_frozen_pts);
@@ -1301,6 +1330,8 @@ template <typename T, typename TagT, typename LabelT>
 void Index<T, TagT, LabelT>::prune_neighbors(const uint32_t location, std::vector<Neighbor> &pool,
                                              std::vector<uint32_t> &pruned_list, InMemQueryScratch<T> *scratch)
 {
+    if (strategy == NSG or strategy == TAUMNG)
+        _indexingAlpha = 1;
     prune_neighbors(location, pool, _indexingRange, _indexingMaxC, _indexingAlpha, pruned_list, scratch);
 }
 

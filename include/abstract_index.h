@@ -45,6 +45,16 @@ class AbstractIndex
     bool use_extra_search = false;
     bool use_cached_top1 = true;
 
+    enum prune_strategy {
+        VAMANA = 0,
+        NSG = 1,
+        TAUMNG = 2,
+    };
+
+    prune_strategy strategy = NSG;
+    float tau = 0.04; // sift:10  gist:0.04
+
+
 
     // build setting
     int AKNNG_R = 32;   // AKNNG degree limit R

@@ -430,7 +430,7 @@ int main(int argc, char **argv) {
     bool is_train, is_eval, is_validate;
 
 
-    std::string dataset = "test";
+    std::string dataset = "sift1m";
     diskann::Metric metric = diskann::Metric::L2;
     is_train = false;
     is_eval = false;
@@ -448,7 +448,7 @@ int main(int argc, char **argv) {
         is_validate = std::stoi(argv[4]) != 0;
     }
 
-    std::string data_prefix = "data/" + dataset;
+    std::string data_prefix = "/root/xiaoyao_zhong/dataset/data/" + dataset;
     index_path_prefix = data_prefix + "/index_" + dataset + "_learn_R32_L50_A1.2";
 
     query_file = data_prefix + "/" + dataset + "_query.fbin";
@@ -467,7 +467,7 @@ int main(int argc, char **argv) {
     Lvec.assign({50});
     if (not is_train)
         Lvec.assign({10, 20, 30, 40, 50, 100});
-    std::filesystem::path new_path("/app/DiskANN/build");
+    std::filesystem::path new_path("/root/xiaoyao_zhong/dataset/");
     std::filesystem::current_path(new_path);
     std::filesystem::path  cwd = std::filesystem::current_path();
     std::cout << cwd << std::endl;

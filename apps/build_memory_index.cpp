@@ -25,6 +25,7 @@ namespace po = boost::program_options;
 int main(int argc, char **argv)
 {
     std::string data_type, dist_fn, data_path, index_path_prefix, label_file, universal_label, label_type;
+    std::string algo_name, dataset_name;
     uint32_t num_threads, R, L, Lf, build_PQ_bytes;
     float alpha;
     bool use_pq_build, use_opq;
@@ -45,6 +46,10 @@ int main(int argc, char **argv)
                                        program_options_utils::INDEX_PATH_PREFIX_DESCRIPTION);
         required_configs.add_options()("data_path", po::value<std::string>(&data_path)->required(),
                                        program_options_utils::INPUT_DATA_PATH);
+        required_configs.add_options()("algorithm", po::value<std::string>(&algo_name)->required(),
+                program_options_utils::INPUT_ALGORITHM_NAME);
+        required_configs.add_options()("dataset", po::value<std::string>(&dataset_name)->required(),
+                program_options_utils::INPUT_DATASET_NAME);
 
         // Optional parameters
         po::options_description optional_configs("Optional");
@@ -166,6 +171,29 @@ int main(int argc, char **argv)
 
         auto index_factory = diskann::IndexFactory(config);
         auto index = index_factory.create_instance();
+        index->use_cached_top1 = false;
+        index->use_knn_graph = false;
+
+
+        std::unordered_map<std::string, float> tau_map = {
+                {"SIFT", 10},
+                {"GIST", 0.04}
+        };
+
+
+        if (algo_name == "TAUMNG") {
+            index->tau = tau_map[dataset_name];
+            index->strategy = diskann::AbstractIndex::TAUMNG;
+
+        }
+        if (algo_name == "VAMANA") {
+            index->strategy = diskann::AbstractIndex::VAMANA;
+        }
+        if (algo_name == "NSG") {
+            index->strategy = diskann::AbstractIndex::NSG;
+        }
+
+
         index->build(data_path, data_num, filter_params);
 //        index->build(query, data_num, tags);
         index->save(index_path_prefix.c_str());
