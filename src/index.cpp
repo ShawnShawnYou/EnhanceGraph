@@ -236,9 +236,8 @@ template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, Labe
 // 4 byte uint32_t)
 template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, LabelT>::save_graph(std::string graph_file)
 {
-    _top1_graph_store->store(graph_file + "_top1", _nd + _num_frozen_pts, _num_frozen_pts, _start);
-    _knn_graph_store->store(graph_file + "_knn", _nd + _num_frozen_pts, _num_frozen_pts, _start);
-    return _graph_store->store(graph_file, _nd + _num_frozen_pts, _num_frozen_pts, _start);
+    _dual_graph_store->store(graph_file + ".dg", _nd + _num_frozen_pts, _num_frozen_pts, _start);
+    return _graph_store->store(graph_file + ".pg", _nd + _num_frozen_pts, _num_frozen_pts, _start);
 }
 
 template <typename T, typename TagT, typename LabelT>
@@ -334,9 +333,8 @@ void Index<T, TagT, LabelT>::save(const char *filename, bool compact_before_save
         // the files are deleted before save. Ideally, we should check
         // the error code for delete_file, but will ignore now because
         // delete should succeed if save will succeed.
-        delete_file(graph_file + "_knn");
-        delete_file(graph_file + "_top1");
-        delete_file(graph_file);
+        delete_file(graph_file + ".dg");
+        delete_file(graph_file + ".pg");
         save_graph(graph_file);
         delete_file(data_file);
         save_data(data_file);
@@ -655,9 +653,8 @@ template <typename T, typename TagT, typename LabelT>
 size_t Index<T, TagT, LabelT>::load_graph(std::string filename, size_t expected_num_points)
 {
 #endif
-    auto res = _graph_store->load(filename, expected_num_points);
-    auto res_knn = _knn_graph_store->load(filename + "_knn", expected_num_points);
-    auto res_top1 = _top1_graph_store->load(filename + "_top1", expected_num_points);
+    auto res = _graph_store->load(filename + ".pg", expected_num_points);
+    auto res_dual = _dual_graph_store->load(filename + ".dg", expected_num_points);
 
     _start = std::get<1>(res);
     _num_frozen_pts = std::get<2>(res);
@@ -984,7 +981,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
 
     if (use_cached_top1) {
         diskann::location_t our_best_nn_id = best_L_nodes[0].id;
-        auto top1_adj_list = _top1_graph_store->get_neighbours(our_best_nn_id);
+        auto top1_adj_list = _dual_graph_store->get_neighbours(our_best_nn_id);
 
         for (auto adj : top1_adj_list) {
             best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)));
@@ -1003,7 +1000,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
                 gt_knn.insert(base_gt_id_vec[tmp_i + 1]);
 
             std::set<uint32_t> gt_aknn;
-            auto adj_list = _knn_graph_store->get_neighbours(best_L_nodes[0].id);
+            auto adj_list = _dual_graph_store->get_neighbours(best_L_nodes[0].id);
             for (auto adj : adj_list) {
                 gt_aknn.insert(adj);
             }
@@ -1035,7 +1032,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
         }
 
         diskann::location_t our_best_nn_id = best_L_nodes[0].id;
-        auto adj_list = _knn_graph_store->get_neighbours(our_best_nn_id);
+        auto adj_list = _dual_graph_store->get_neighbours(our_best_nn_id);
 
         for (auto adj : adj_list) {
             if (_data_store->get_distance(query, adj) < _data_store->get_distance(query, best_L_nodes[best_L_nodes.size() - 1].id)) {
@@ -1197,37 +1194,7 @@ void Index<T, TagT, LabelT>::search_for_point_and_prune(int location, uint32_t L
         }
     }
 
-
-    if (strategy != TAUMNG) {
-        prune_neighbors(location, pool, pruned_list, scratch);
-    } else {
-        std::vector<Neighbor> backup_pool(pool);
-        std::unordered_set<location_t> already_neighbors(pruned_list.begin(), pruned_list.end());
-
-        for (auto candidate : backup_pool) {
-            if (already_neighbors.find(candidate.id) != already_neighbors.end())
-                continue;
-
-            if (candidate.distance < tau) {
-                pruned_list.push_back(candidate.id);
-                already_neighbors.insert(candidate.id);
-            }
-
-            bool is_add_edge = true;
-            for (auto neighbor_id : pruned_list) {
-                bool condition_1 = get_distance(location, neighbor_id) < candidate.distance;
-                bool condition_2 = get_distance(candidate.id, neighbor_id) < candidate.distance - 3 * tau;
-                if (condition_1 and condition_2) {
-                    is_add_edge = false;
-                    break;
-                }
-            }
-            if (is_add_edge) {
-                pruned_list.push_back(candidate.id);
-                already_neighbors.insert(candidate.id);
-            }
-        }
-    }
+    prune_neighbors(location, pool, pruned_list, scratch);
 
     assert(!pruned_list.empty());
     assert(_graph_store->get_total_points() == _max_points + _num_frozen_pts);
@@ -1534,7 +1501,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
         }
         {
             LockGuard guard(_locks[node]);
-            _knn_graph_store->set_neighbours(node, original_list);
+            _dual_graph_store->set_neighbours(node, original_list);
         }
 
         if (node_ctr % 100000 == 0)
@@ -1572,8 +1539,58 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
             }
             prune_neighbors(node, dummy_pool, new_out_neighbors, scratch);
 
+            if (strategy == TAUMNG) {
+                std::vector<Neighbor> backup_pool(dummy_pool);
+                std::unordered_set<location_t> already_neighbors(new_out_neighbors.begin(), new_out_neighbors.end());
+
+                for (auto candidate : backup_pool) {
+                    if (already_neighbors.find(candidate.id) != already_neighbors.end())
+                        continue;
+
+                    if (new_out_neighbors.size() >= _indexingRange)
+                        break;
+
+                    if (candidate.distance < tau) {
+                        new_out_neighbors.push_back(candidate.id);
+                        already_neighbors.insert(candidate.id);
+                    } else {
+                        bool is_add_edge = true;
+                        for (auto neighbor_id : new_out_neighbors) {
+                            bool condition_1 = get_distance(node, neighbor_id) < candidate.distance;
+                            bool condition_2 = get_distance(candidate.id, neighbor_id) < candidate.distance - 3 * tau;
+                            if (condition_1 and condition_2) {
+                                is_add_edge = false;
+                                break;
+                            }
+                        }
+                        if (is_add_edge) {
+                            new_out_neighbors.push_back(candidate.id);
+                            already_neighbors.insert(candidate.id);
+                        }
+                    }
+                }
+            }
+
+
             _graph_store->clear_neighbours((location_t)node);
             _graph_store->set_neighbours((location_t)node, new_out_neighbors);
+
+            // reduce graph size
+            auto full_neighbors = _dual_graph_store->get_neighbours((location_t)node);
+            auto proximity_neighbors = _graph_store->get_neighbours((location_t)node);
+            std::unordered_set<uint32_t> proximity_neighbor_set(proximity_neighbors.begin(), proximity_neighbors.end());
+
+            std::vector<uint32_t> dual_neighbors;
+            for (auto neighbor : full_neighbors) {
+                if (proximity_neighbor_set.find(neighbor) == proximity_neighbor_set.end()) {
+                    dual_neighbors.emplace_back(neighbor);
+                    proximity_neighbor_set.insert(neighbor);
+                }
+            }
+
+            _dual_graph_store->clear_neighbours((location_t)node);
+            _dual_graph_store->set_neighbours((location_t)node, dual_neighbors);
+
         }
     }
     if (_nd > 0)

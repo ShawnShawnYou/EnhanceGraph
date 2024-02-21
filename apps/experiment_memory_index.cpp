@@ -89,7 +89,7 @@ template <typename T, typename LabelT = uint32_t>
     std::unordered_map<uint32_t, std::vector<uint32_t>> route_map;                  // key: query id    value: route
 
 
-    bool is_calculate_middle = true;
+    bool is_calculate_middle = is_train;
     if (is_calculate_middle and use_cached_top1) {
         // 根据50个topk的结果来生成query，每个topk生成10个
         // 500个结果看看能收敛到哪里
@@ -115,15 +115,32 @@ template <typename T, typename LabelT = uint32_t>
 
             for (int i = 0; i < test_base_size; i++) {
                 int base_id = i + 10000;
-                auto adj_list = index->get_aknng_neighbors(base_id);
+                auto dual_adj_list = index->get_neighbors_dual(base_id);
+                auto neighbors = index->get_neighbors(base_id);
 
                 float* base_data = new float[query_aligned_dim];
                 index->get_data(base_data, base_id);
 
-                assert(topk_num - 1 + top_k_start < adj_list.size());
+                std::vector<std::pair<uint32_t, float>> full_adj;
+                for (int k = 0; k < dual_adj_list.size(); k++) {
+                    uint32_t topk_id = dual_adj_list[k + top_k_start];
+                    float distance = index->get_distance(base_data, topk_id);
+                    full_adj.emplace_back(topk_id, distance);
+                }
+                for (auto neighbor_id : neighbors) {
+                    float distance = index->get_distance(base_data, neighbor_id);
+                    full_adj.emplace_back((uint32_t)neighbor_id, distance);
+                }
+
+                std::sort(full_adj.begin(), full_adj.end(), [](auto a, auto b) {
+                    return a.second < b.second;
+                });
+
+
+                assert(topk_num - 1 + top_k_start < full_adj.size());
 
                 for (int k = 0; k < topk_num; k++) {
-                    diskann::location_t topk_id = adj_list[k + top_k_start];
+                    diskann::location_t topk_id = full_adj[k + top_k_start].first;
                     float* topk_data = new float[query_aligned_dim];
                     index->get_data(topk_data, topk_id);
 
@@ -195,12 +212,32 @@ template <typename T, typename LabelT = uint32_t>
     #pragma omp parallel for schedule(dynamic, 1)
             for (int i = 0; i < test_base_size; i++)  {
                 int base_id = i + 10000;
-                auto adj_list = index->get_aknng_neighbors(base_id);
+                auto dual_adj_list = index->get_neighbors_dual(base_id);
+                auto neighbors = index->get_neighbors(base_id);
 
-                assert(topk_num - 1 + top_k_start < adj_list.size());
+                float* base_data = new float[query_aligned_dim];
+                index->get_data(base_data, base_id);
+
+                std::vector<std::pair<uint32_t, float>> full_adj;
+                for (int k = 0; k < dual_adj_list.size(); k++) {
+                    uint32_t topk_id = dual_adj_list[k + top_k_start];
+                    float distance = index->get_distance(base_data, topk_id);
+                    full_adj.emplace_back(topk_id, distance);
+                }
+                for (auto neighbor_id : neighbors) {
+                    float distance = index->get_distance(base_data, neighbor_id);
+                    full_adj.emplace_back((uint32_t)neighbor_id, distance);
+                }
+
+                std::sort(full_adj.begin(), full_adj.end(), [](auto a, auto b) {
+                    return a.second < b.second;
+                });
+
+
+                assert(topk_num - 1 + top_k_start < full_adj.size());
 
                 for (int k = 0; k < topk_num; k++) {
-                    diskann::location_t topk_id = adj_list[k + top_k_start];
+                    diskann::location_t topk_id = full_adj[k + top_k_start].first;
 
                     float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
 
@@ -250,7 +287,7 @@ template <typename T, typename LabelT = uint32_t>
             }
 
             for (auto p : add_edges) {
-                index->add_neighbor_top1(p.first, p.second);
+                index->add_neighbor_dual(p.first, p.second);
                 count_add_edges++;
             }
 
@@ -367,6 +404,13 @@ template <typename T, typename LabelT = uint32_t>
                     }
                 }
 
+                if (is_train && test_id == 0) {
+                    if (our_nn_id != gt_nn_id) {
+                        add_edge_pairs.insert({our_nn_id, gt_nn_id});
+                    }
+
+                }
+
             }
 
             auto qe = std::chrono::high_resolution_clock::now();
@@ -374,6 +418,13 @@ template <typename T, typename LabelT = uint32_t>
             latency_stats[i] = (float)(diff.count() * 1000000);
         }
 
+        if (is_train && test_id == 0) {
+            for (auto p : add_edge_pairs)
+                index->add_neighbor_dual(p.first, p.second);
+            add_edge_pairs.clear();
+
+            index->save((index_path + "_train").c_str(), false);
+        }
         if (print_all_recalls) {
             std::chrono::duration<double> diff = std::chrono::high_resolution_clock::now() - s;
 
@@ -422,16 +473,19 @@ template <typename T, typename LabelT = uint32_t>
 
 
 int main(int argc, char **argv) {
-    std::string data_type, dist_fn, index_path_prefix, query_file, gt_file, filter_label,
+    std::string data_type, index_path_prefix, query_file, gt_file, filter_label,
     label_type, query_filters_file;
-    uint32_t num_threads, K;
+    uint32_t num_threads, K, train_K;
     std::vector<uint32_t> Lvec;
     std::vector<std::string> query_filters;
     bool is_train, is_eval, is_validate;
 
 
     std::string dataset = "sift1m";
-    diskann::Metric metric = diskann::Metric::L2;
+    std::string algo_name = "VAMANA";
+    std::string dist_fn = "l2";
+    K = 10;
+    train_K = 50;
     is_train = false;
     is_eval = false;
     is_validate = false;
@@ -447,9 +501,48 @@ int main(int argc, char **argv) {
     if (argc >= 5) {
         is_validate = std::stoi(argv[4]) != 0;
     }
+    if (argc >= 6) {
+        algo_name = std::string(argv[5]);
+    }
+    if (argc >= 7) {
+        dist_fn = std::string(argv[6]);
+    }
+    if (argc >= 8) {
+        K = std::stoi(argv[7]);
+    }
+    if (argc >= 9) {
+        train_K = std::stoi(argv[8]);
+    }
 
-    std::string data_prefix = "/root/xiaoyao_zhong/dataset/data/" + dataset;
-    index_path_prefix = data_prefix + "/index_" + dataset + "_learn_R32_L50_A1.2";
+
+    diskann::Metric metric;
+    if (dist_fn == std::string("mips"))
+    {
+        metric = diskann::Metric::INNER_PRODUCT;
+    }
+    else if (dist_fn == std::string("l2"))
+    {
+        metric = diskann::Metric::L2;
+    }
+    else if (dist_fn == std::string("cosine"))
+    {
+        metric = diskann::Metric::COSINE;
+    }
+    else
+    {
+        std::cout << "Unsupported distance function. Currently only L2/ Inner "
+                     "Product/Cosine are supported."
+                     << std::endl;
+        return -1;
+    }
+    std::string root_dir = "/root/xiaoyao_zhong/";
+    std::string data_prefix = root_dir + "dataset/data/" + dataset;
+    index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset + "_learn_R32_L50_A1.2";
+
+    if (is_eval or is_validate) {
+        index_path_prefix = index_path_prefix + "_train";
+    }
+
 
     query_file = data_prefix + "/" + dataset + "_query.fbin";
     gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
@@ -463,17 +556,13 @@ int main(int argc, char **argv) {
     }
 
     num_threads = 20;
-    K = 10;
-    Lvec.assign({50});
-    if (not is_train)
-        Lvec.assign({10, 20, 30, 40, 50, 100});
-    std::filesystem::path new_path("/root/xiaoyao_zhong/dataset/");
-    std::filesystem::current_path(new_path);
-    std::filesystem::path  cwd = std::filesystem::current_path();
-    std::cout << cwd << std::endl;
-    //    Lvec.assign({50, 50});
-    //    std::filesystem::path cwd = std::filesystem::current_path();
-    //    std::cout << cwd << std::endl;
+    if (not is_train) {
+        for (int i = 20; i <= 200; i+=10){
+            Lvec.push_back(i);
+        }
+    } else {
+        Lvec.assign({train_K});
+    }
     same_node_test<float>(metric, index_path_prefix, query_file, gt_file,
                           num_threads, K, Lvec,
                           is_train, is_validate or is_eval);

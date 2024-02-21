@@ -50,16 +50,20 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
      **************************************************************************/
 
   public:
-    const std::vector<diskann::location_t> & get_aknng_neighbors(location_t id) {
-        return _knn_graph_store->get_neighbours(id);
+    const std::vector<diskann::location_t> & get_neighbors_dual(location_t id) {
+        return _dual_graph_store->get_neighbours(id);
+    }
+
+    const std::vector<diskann::location_t> & get_neighbors(location_t id) {
+        return _graph_store->get_neighbours(id);
     }
 
     DISKANN_DLLEXPORT void add_neighbor(location_t out_id, location_t in_id) {
         _graph_store->add_neighbour(out_id, in_id);
     }
 
-    DISKANN_DLLEXPORT void add_neighbor_top1(location_t out_id, location_t in_id) {
-        _top1_graph_store->add_neighbour(out_id, in_id);
+    DISKANN_DLLEXPORT void add_neighbor_dual(location_t out_id, location_t in_id) {
+        _dual_graph_store->add_neighbour(out_id, in_id);
     }
 
     DISKANN_DLLEXPORT float get_distance(location_t loc1, location_t loc2) {
@@ -75,12 +79,8 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     }
 
 
-    DISKANN_DLLEXPORT void init_knn_graph_store(std::unique_ptr<AbstractGraphStore> graph_store) {
-        _knn_graph_store = std::move(graph_store);
-    }
-
-    DISKANN_DLLEXPORT void init_top1_graph_store(std::unique_ptr<AbstractGraphStore> graph_store) {
-        _top1_graph_store = std::move(graph_store);
+    DISKANN_DLLEXPORT void init_dual_graph_store(std::unique_ptr<AbstractGraphStore> graph_store) {
+        _dual_graph_store = std::move(graph_store);
     }
 
     // Call this when creating and passing Index Config is inconvenient.
@@ -371,9 +371,7 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
     // Graph related data structures
     std::unique_ptr<AbstractGraphStore> _graph_store;
 
-    std::unique_ptr<AbstractGraphStore> _knn_graph_store;
-
-    std::unique_ptr<AbstractGraphStore> _top1_graph_store;
+    std::unique_ptr<AbstractGraphStore> _dual_graph_store;
 
     char *_opt_graph = nullptr;
 

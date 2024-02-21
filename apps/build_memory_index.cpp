@@ -176,8 +176,8 @@ int main(int argc, char **argv)
 
 
         std::unordered_map<std::string, float> tau_map = {
-                {"SIFT", 10},
-                {"GIST", 0.04}
+                {"sift1m", 10},
+                {"gist1m", 0.04}
         };
 
 

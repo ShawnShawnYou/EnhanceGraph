@@ -86,10 +86,11 @@ class AbstractIndex
 
     virtual void get_data(float* data, diskann::location_t id) = 0;
 
-    virtual const std::vector<diskann::location_t> &get_aknng_neighbors(location_t id) = 0;
+    virtual const std::vector<diskann::location_t> &get_neighbors_dual(location_t id) = 0;
+    virtual const std::vector<diskann::location_t> &get_neighbors(location_t id) = 0;
 
     virtual void add_neighbor(diskann::location_t out_id, diskann::location_t in_id) = 0;
-    virtual void add_neighbor_top1(location_t out_id, location_t in_id) = 0;
+    virtual void add_neighbor_dual(location_t out_id, location_t in_id) = 0;
     virtual float get_distance(location_t loc1, location_t loc2) = 0;
     virtual float get_distance(float* query, location_t loc2) = 0;
 

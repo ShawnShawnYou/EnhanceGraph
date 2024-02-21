@@ -200,7 +200,7 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path,
 
         if (is_train && test_id == 0) {
             for (auto p : add_edge_pairs)
-                index->add_neighbor_top1(p.first, p.second);
+                index->add_neighbor_dual(p.first, p.second);
             add_edge_pairs.clear();
 
             index->save(index_path.c_str(), false);
@@ -597,7 +597,7 @@ int search_memory_index(diskann::Metric &metric, const std::string &index_path, 
 
 
 int main(int argc, char **argv) {
-    std::string data_type, dist_fn, index_path_prefix, query_file, gt_file, filter_label,
+    std::string data_type, index_path_prefix, query_file, gt_file, filter_label,
     label_type, query_filters_file;
     uint32_t num_threads, K;
     std::vector<uint32_t> Lvec;
@@ -606,7 +606,8 @@ int main(int argc, char **argv) {
 
 
     std::string dataset = "test";
-    diskann::Metric metric = diskann::Metric::L2;
+    std::string algo_name = "VAMANA";
+    std::string dist_fn = "l2";
     is_train = false;
     is_eval = false;
     is_validate = false;
@@ -622,9 +623,39 @@ int main(int argc, char **argv) {
     if (argc >= 5) {
         is_validate = std::stoi(argv[4]) != 0;
     }
+    if (argc >= 6) {
+        algo_name = std::string(argv[5]);
+    }
+    if (argc >= 7) {
+        dist_fn = std::string(argv[6]);
+    }
 
-    std::string data_prefix = "data/" + dataset;
-    index_path_prefix = data_prefix + "/index_" + dataset + "_learn_R32_L50_A1.2";
+
+    diskann::Metric metric;
+    if (dist_fn == std::string("mips"))
+    {
+        metric = diskann::Metric::INNER_PRODUCT;
+    }
+    else if (dist_fn == std::string("l2"))
+    {
+        metric = diskann::Metric::L2;
+    }
+    else if (dist_fn == std::string("cosine"))
+    {
+        metric = diskann::Metric::COSINE;
+    }
+    else
+    {
+        std::cout << "Unsupported distance function. Currently only L2/ Inner "
+                     "Product/Cosine are supported."
+                     << std::endl;
+        return -1;
+    }
+
+
+    std::string root_dir = "/root/xiaoyao_zhong/";
+    std::string data_prefix = root_dir + "dataset/data/" + dataset;
+    index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset + "_learn_R32_L50_A1.2";
 
     query_file = data_prefix + "/" + dataset + "_query.fbin";
     gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
