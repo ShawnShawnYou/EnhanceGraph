@@ -473,9 +473,9 @@ template <typename T, typename LabelT = uint32_t>
 
 
 int main(int argc, char **argv) {
-    std::string data_type, index_path_prefix, query_file, gt_file, filter_label,
+    std::string data_type, index_path_prefix, query_file, gt_file, filter_label, result_path,
     label_type, query_filters_file;
-    uint32_t num_threads, K, train_K;
+    uint32_t num_threads, K, train_L;
     std::vector<uint32_t> Lvec;
     std::vector<std::string> query_filters;
     bool is_train, is_eval, is_validate;
@@ -485,7 +485,7 @@ int main(int argc, char **argv) {
     std::string algo_name = "VAMANA";
     std::string dist_fn = "l2";
     K = 10;
-    train_K = 50;
+    train_L = 50;
     is_train = false;
     is_eval = false;
     is_validate = false;
@@ -511,7 +511,11 @@ int main(int argc, char **argv) {
         K = std::stoi(argv[7]);
     }
     if (argc >= 9) {
-        train_K = std::stoi(argv[8]);
+        train_L = std::stoi(argv[8]);
+    }
+    if (argc >= 10) {
+        result_path = std::string(argv[9]);
+        freopen(result_path.c_str(), "w", stdout);
     }
 
 
@@ -561,7 +565,7 @@ int main(int argc, char **argv) {
             Lvec.push_back(i);
         }
     } else {
-        Lvec.assign({train_K});
+        Lvec.assign({train_L});
     }
     same_node_test<float>(metric, index_path_prefix, query_file, gt_file,
                           num_threads, K, Lvec,
