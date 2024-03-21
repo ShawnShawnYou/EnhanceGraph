@@ -10,6 +10,8 @@
 #include "timer.h"
 #include "percentile_stats.h"
 #include "program_options_utils.hpp"
+#include <signal.h>
+#include <iostream>
 
 #ifndef _WINDOWS
 #include <sys/mman.h>
@@ -33,11 +35,18 @@
 
 
 
+void handle_sigterm(int sig)
+{
+    std::cout << "Received SIGTERM, not terminating." << std::endl;
+}
+
+
+
 template <typename T, typename LabelT = uint32_t>
         int same_node_test(diskann::Metric &metric, const std::string &index_path,
                            const std::string &query_file, const std::string &truthset_file, const uint32_t num_threads,
                            const uint32_t recall_at, const std::vector<uint32_t> &Lvec,
-                           const bool is_train, const bool use_cached_top1) {
+                           const bool is_train, const bool use_cached_top1, int topk_num=32, std::string delta_str="0.51") {
 
     // dim and num
     using TagT = uint32_t;
@@ -95,12 +104,12 @@ template <typename T, typename LabelT = uint32_t>
         // 500个结果看看能收敛到哪里
 
         int test_base_size = 10000;
-        int topk_num = 32;
         int top_k_start = 0;
         std::vector<float> delta_list = {0.51, 0.6, 0.7, 0.8, 0.9, 1};
         //    delta_list.assign({0, 1});
         //    delta_list.assign({0.1, 0.2, 0.3, 0.4, 0.49});
-        delta_list.assign({0.51});
+        float delta = std::stof(delta_str);
+        delta_list.assign({delta});
 
         bool calculate_gt = false;
 
@@ -376,42 +385,43 @@ template <typename T, typename LabelT = uint32_t>
                     ).second;
 
 
-            // 注意id没在query里，query只有向量，id应该是tag
-            uint32_t *gt_id_vec_start = gt_ids + (uint32_t)gt_dim * i;
-            float* gt_dist_vec_start = gt_dists + (uint32_t)gt_dim * i;
+            if (is_train) {
+                // 注意id没在query里，query只有向量，id应该是tag
+                uint32_t *gt_id_vec_start = gt_ids + (uint32_t)gt_dim * i;
+                float* gt_dist_vec_start = gt_dists + (uint32_t)gt_dim * i;
 
-            diskann::location_t gt_nn_id = gt_id_vec_start[0];
-            diskann::location_t our_nn_id = query_result_ids[test_id][i * recall_at];
-            //            float gt_nn_dist = gt_dist_vec_start[0];
-            //            float our_nn_dist = query_result_dists[test_id][i * recall_at];
+                diskann::location_t gt_nn_id = gt_id_vec_start[0];
+                diskann::location_t our_nn_id = query_result_ids[test_id][i * recall_at];
+                //            float gt_nn_dist = gt_dist_vec_start[0];
+                //            float our_nn_dist = query_result_dists[test_id][i * recall_at];
 
-            std::vector<diskann::location_t> gt_id_vec(gt_id_vec_start,gt_id_vec_start + (uint32_t)recall_at);
-            std::vector<float> gt_dist_vec(gt_dist_vec_start,gt_dist_vec_start + (uint32_t)recall_at);
+                std::vector<diskann::location_t> gt_id_vec(gt_id_vec_start,gt_id_vec_start + (uint32_t)recall_at);
+                std::vector<float> gt_dist_vec(gt_dist_vec_start,gt_dist_vec_start + (uint32_t)recall_at);
+                #pragma omp critical
+                {
+                    route_map[i] = route;
+                    gt_map[i] = gt_nn_id;
+                    our_map[i] = our_nn_id;
 
+                    //                if (test_id == 0) {
+                    //                    gt_nn_query_id_map[gt_nn_id].push_back(i);
+                    //                    our_nn_query_id_map[our_nn_id].push_back(i);
+                    //                    lid += *(gt_dist_vec_start + 49);
+                    //                    if (*(gt_dist_vec_start + 49) > max_distance) {
+                    //                        max_distance = *(gt_dist_vec_start + 49);
+                    //                    }
+                    //                }
 
-            #pragma omp critical
-            {
-                route_map[i] = route;
-                gt_map[i] = gt_nn_id;
-                our_map[i] = our_nn_id;
+                    if (test_id == 0) {
+                        if (our_nn_id != gt_nn_id) {
+                            add_edge_pairs.insert({our_nn_id, gt_nn_id});
+                        }
 
-                if (test_id == 0) {
-                    gt_nn_query_id_map[gt_nn_id].push_back(i);
-                    our_nn_query_id_map[our_nn_id].push_back(i);
-                    lid += *(gt_dist_vec_start + 49);
-                    if (*(gt_dist_vec_start + 49) > max_distance) {
-                        max_distance = *(gt_dist_vec_start + 49);
                     }
-                }
-
-                if (is_train && test_id == 0) {
-                    if (our_nn_id != gt_nn_id) {
-                        add_edge_pairs.insert({our_nn_id, gt_nn_id});
-                    }
 
                 }
-
             }
+
 
             auto qe = std::chrono::high_resolution_clock::now();
             std::chrono::duration<double> diff = qe - qs;
@@ -423,8 +433,9 @@ template <typename T, typename LabelT = uint32_t>
                 index->add_neighbor_dual(p.first, p.second);
             add_edge_pairs.clear();
 
-            index->save((index_path + "_train").c_str(), false);
+            index->save((index_path + "_train_" + std::to_string(L) + "_" + delta_str).c_str(), false);
         }
+
         if (print_all_recalls) {
             std::chrono::duration<double> diff = std::chrono::high_resolution_clock::now() - s;
 
@@ -467,15 +478,18 @@ template <typename T, typename LabelT = uint32_t>
 
     }
 
-
 }
 
 
 
 int main(int argc, char **argv) {
+    struct sigaction sa;
+    sa.sa_handler = &handle_sigterm;
+    sigaction(SIGTERM, &sa, NULL);
+
     std::string data_type, index_path_prefix, query_file, gt_file, filter_label, result_path,
     label_type, query_filters_file;
-    uint32_t num_threads, K, train_L;
+    uint32_t num_threads, K, train_L, topk_num, build_L, build_R;
     std::vector<uint32_t> Lvec;
     std::vector<std::string> query_filters;
     bool is_train, is_eval, is_validate;
@@ -484,8 +498,12 @@ int main(int argc, char **argv) {
     std::string dataset = "sift1m";
     std::string algo_name = "VAMANA";
     std::string dist_fn = "l2";
+    std::string build_A = "1.2";
+    std::string delta_str = "0.6";
     K = 10;
     train_L = 50;
+    build_L = 50;
+    build_R = 32;
     is_train = false;
     is_eval = false;
     is_validate = false;
@@ -517,6 +535,19 @@ int main(int argc, char **argv) {
         result_path = std::string(argv[9]);
         freopen(result_path.c_str(), "w", stdout);
     }
+    if (argc >= 11) {
+        build_L = std::stoi(argv[10]);
+    }
+    if (argc >= 12) {
+        build_R = std::stoi(argv[11]);
+    }
+    if (argc >= 13) {
+        build_A = std::string(argv[12]);
+    }
+    if (argc >= 14) {
+        delta_str = std::string(argv[13]);
+    }
+    topk_num = build_R;
 
 
     diskann::Metric metric;
@@ -541,10 +572,11 @@ int main(int argc, char **argv) {
     }
     std::string root_dir = "/root/xiaoyao_zhong/";
     std::string data_prefix = root_dir + "dataset/data/" + dataset;
-    index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset + "_learn_R32_L50_A1.2";
+    index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset +
+            "_learn_R" + std::to_string(build_R) + "_L" + std::to_string(build_L) + "_A" + build_A;
 
     if (is_eval or is_validate) {
-        index_path_prefix = index_path_prefix + "_train";
+        index_path_prefix = index_path_prefix + "_train_" + std::to_string(train_L) + "_" + delta_str;
     }
 
 
@@ -559,9 +591,9 @@ int main(int argc, char **argv) {
         gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
     }
 
-    num_threads = 20;
+    num_threads = 56;
     if (not is_train) {
-        for (int i = 20; i <= 200; i+=10){
+        for (int i = 100; i <= 500; i+=100){
             Lvec.push_back(i);
         }
     } else {
@@ -569,5 +601,5 @@ int main(int argc, char **argv) {
     }
     same_node_test<float>(metric, index_path_prefix, query_file, gt_file,
                           num_threads, K, Lvec,
-                          is_train, is_validate or is_eval);
+                          is_train, is_validate or is_eval, topk_num, delta_str);
 }

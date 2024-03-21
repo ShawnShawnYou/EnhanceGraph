@@ -8,6 +8,8 @@
 #include "index.h"
 #include "utils.h"
 #include "program_options_utils.hpp"
+#include <signal.h>
+#include <iostream>
 
 #ifndef _WINDOWS
 #include <sys/mman.h>
@@ -22,8 +24,17 @@
 
 namespace po = boost::program_options;
 
+void handle_sigterm(int sig)
+{
+    std::cout << "Received SIGTERM, not terminating." << std::endl;
+}
+
 int main(int argc, char **argv)
 {
+    struct sigaction sa;
+    sa.sa_handler = &handle_sigterm;
+    sigaction(SIGTERM, &sa, NULL);
+
     std::string data_type, dist_fn, data_path, index_path_prefix, label_file, universal_label, label_type;
     std::string algo_name, dataset_name;
     uint32_t num_threads, R, L, Lf, build_PQ_bytes;
@@ -206,6 +217,7 @@ int main(int argc, char **argv)
         diskann::cerr << "Index build failed." << std::endl;
         return -1;
     }
+
 }
 // build
 // --data_type float --dist_fn l2 --data_path data/sift/sift_learn.fbin --index_path_prefix data/sift/index_sift_learn_R32_L50_A1.2 -R 32 -L 50 --alpha 1.2
