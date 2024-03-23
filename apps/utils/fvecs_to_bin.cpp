@@ -3,6 +3,11 @@
 
 #include <iostream>
 #include "utils.h"
+#include <signal.h>
+void handle_sigterm(int sig)
+{
+    std::cout << "Received SIGTERM, not terminating." << std::endl;
+}
 
 // Convert float types
 void block_convert_float(std::ifstream &reader, std::ofstream &writer, float *read_buf, float *write_buf,
@@ -100,13 +105,12 @@ void generate_random_dataset_fbin() {
 }
 
 
-void generate_random_data_based_on_origin(std::string dataset,
-                                          std::string original_data_path, std::string new_data_path, std::string train_data_path,
-                                          size_t jump_npts = 10000, size_t num_copy = 5, size_t num_base = 10000) {
+void generate_random_data_based_on_origin(std::string base_data_path, std::string generated_data_path,
+                                          size_t num_base = 10000,
+                                          size_t num_copy = 1, size_t jump_npts = 0, int sampled_base_num = 50000) {
 
-    std::ifstream reader(original_data_path, std::ios::binary | std::ios::ate);
-    std::ofstream writer(new_data_path, std::ios::binary);
-    std::ofstream writer_train(train_data_path, std::ios::binary);
+    std::ifstream reader(base_data_path, std::ios::binary | std::ios::ate);
+    std::ofstream writer(generated_data_path, std::ios::binary);
 
     size_t fsize = reader.tellg();
     reader.seekg(0, std::ios::beg);
@@ -125,15 +129,9 @@ void generate_random_data_based_on_origin(std::string dataset,
     size_t npts_generated = num_copy * num_base;
     writer.write((char *)&npts_generated, sizeof(int32_t));
     writer.write((char *)&ndims, sizeof(int32_t));
-    writer_train.write((char *)&npts_generated, sizeof(int32_t));
-    writer_train.write((char *)&ndims, sizeof(int32_t));
 
     float *write_buf = new float[npts_generated * ndims * datasize];
-    float *write_buf_train = new float[npts_generated * ndims * datasize];
 
-
-
-    int sampled_base_num = 100000;
     float avg_dim = 0;
     for (int i = 0; i < sampled_base_num; i++) {
         float* query = ((float*)read_buf + (i) * (ndims + 1)) + 1;
@@ -146,11 +144,7 @@ void generate_random_data_based_on_origin(std::string dataset,
     }
     avg_dim /= sampled_base_num;
 
-    if (dataset == "gist1m") {
-        avg_dim /= 20.0;    // += 5%
-    } else if (dataset == "sift1m") {
-        avg_dim /= 10.0;    // += 20%
-    }
+    avg_dim /= 10.0;
 
 
     std::random_device rd;
@@ -166,23 +160,17 @@ void generate_random_data_based_on_origin(std::string dataset,
             for (int dim = 0; dim < ndims; dim++) {
                 data = *(query + dim) + dis(gen);
                 *(write_buf + (i * num_copy + j) * ndims + dim) = data;
-                data = *(query + dim) + dis(gen);
-                *(write_buf_train + (i * num_copy + j) * ndims + dim) = data;
             }
 
         }
 
     }
-//    std::vector<float> test_vec(write_buf, write_buf + 2 * ndims);
     writer.write((char *)write_buf, npts_generated * ndims * sizeof(float));
-    writer_train.write((char *)write_buf_train, npts_generated * ndims * sizeof(float));
 
     delete[] write_buf;
-    delete[] write_buf_train;
     delete[] read_buf;
 
     writer.close();
-    writer_train.close();
     reader.close();
 }
 
@@ -190,26 +178,21 @@ void generate_random_data_based_on_origin(std::string dataset,
 
 int main(int argc, char **argv)
 {
-    std::string data_dir, dataset, query_file, base_file, train_file;
+    struct sigaction sa;
+    sa.sa_handler = &handle_sigterm;
+    sigaction(SIGTERM, &sa, NULL);
 
-    data_dir = "/root/xiaoyao_zhong/dataset/data";
-    dataset = "sift1m";
-
-
-    query_file = data_dir + "/" + dataset + "/" + dataset + "_query.fbin";
-    train_file = data_dir + "/" + dataset + "/" + dataset + "_train.fbin";
-    base_file = data_dir + "/" + dataset + "/" + dataset + "_base.fvecs";
-    generate_random_data_based_on_origin(dataset,
-                                         base_file,
-                                         query_file,
-                                         train_file);
-    return 0;
+//    query_file = data_dir + "/" + dataset + "/" + dataset + "_query.fbin";
+//    train_file = data_dir + "/" + dataset + "/" + dataset + "_train.fbin";
+//    base_file = data_dir + "/" + dataset + "/" + dataset + "_base.fvecs";
+//    return 0;
 //
 //    generate_random_dataset_fbin();
 //    return 0;
 
     size_t target_npts = 0;
     size_t jump_npts = 0;
+    int is_generate = 0;
 
     if (argc < 4)
     {
@@ -220,6 +203,10 @@ int main(int argc, char **argv)
         target_npts = std::stoi(argv[4]);
     if (argc >= 6)
         jump_npts = std::stoi(argv[5]);
+    if (argc >= 7)
+        is_generate = std::stoi(argv[6]);
+
+    jump_npts = 0;
 
     int datasize = sizeof(float);
 
@@ -244,12 +231,21 @@ int main(int argc, char **argv)
     // 先读取第一个向量的维数，再重置reader
 
     size_t npts = fsize / ((ndims * datasize) + sizeof(uint32_t));
+    std::cout << fsize << " " << ndims << " " << datasize << std::endl;
     std::cout << "Dataset: #pts = " << npts << ", # dims = " << ndims << std::endl;
+
+    if (is_generate != 0) {
+        generate_random_data_based_on_origin(argv[2], argv[3], npts);
+        return 0;
+    }
+
+    target_npts = std::min(npts, target_npts);
 
     if (target_npts + jump_npts > npts) {
         std::cout << "Error: too much target and jump npts" << std::endl;
         exit(-1);
     }
+
     npts = std::min(npts, target_npts);
 
 

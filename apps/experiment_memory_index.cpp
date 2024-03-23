@@ -46,7 +46,8 @@ template <typename T, typename LabelT = uint32_t>
         int same_node_test(diskann::Metric &metric, const std::string &index_path,
                            const std::string &query_file, const std::string &truthset_file, const uint32_t num_threads,
                            const uint32_t recall_at, const std::vector<uint32_t> &Lvec,
-                           const bool is_train, const bool use_cached_top1, int topk_num=32, std::string delta_str="0.51") {
+                           const std::string &base_file,
+                           const bool is_train, const bool use_cached_top1, int topk_num=5, std::string delta_str="0.51") {
 
     // dim and num
     using TagT = uint32_t;
@@ -102,8 +103,11 @@ template <typename T, typename LabelT = uint32_t>
     if (is_calculate_middle and use_cached_top1) {
         // 根据50个topk的结果来生成query，每个topk生成10个
         // 500个结果看看能收敛到哪里
-
-        int test_base_size = 10000;
+        size_t read_blk_size = 64 * 1024 * 1024;
+        cached_ifstream reader(base_file, read_blk_size);
+        int npts_i32;
+        reader.read((char *)&npts_i32, sizeof(int));
+        int test_base_size = (uint32_t)npts_i32;
         int top_k_start = 0;
         std::vector<float> delta_list = {0.51, 0.6, 0.7, 0.8, 0.9, 1};
         //    delta_list.assign({0, 1});
@@ -123,7 +127,7 @@ template <typename T, typename LabelT = uint32_t>
             float* test_query = new float[query_aligned_dim * test_query_num];
 
             for (int i = 0; i < test_base_size; i++) {
-                int base_id = i + 10000;
+                int base_id = i;
                 auto dual_adj_list = index->get_neighbors_dual(base_id);
                 auto neighbors = index->get_neighbors(base_id);
 
@@ -217,10 +221,10 @@ template <typename T, typename LabelT = uint32_t>
             float count_add_edges = 0;
             std::set<std::pair<diskann::location_t, diskann::location_t>> add_edges;
 
-            omp_set_num_threads(20);
+            omp_set_num_threads(num_threads);
     #pragma omp parallel for schedule(dynamic, 1)
             for (int i = 0; i < test_base_size; i++)  {
-                int base_id = i + 10000;
+                int base_id = i;
                 auto dual_adj_list = index->get_neighbors_dual(base_id);
                 auto neighbors = index->get_neighbors(base_id);
 
@@ -253,7 +257,7 @@ template <typename T, typename LabelT = uint32_t>
                     std::vector<uint32_t> test_query_result_ids(recall_at);
                     std::vector<float> test_query_result_dists(recall_at);
                     std::vector<uint32_t> route;
-                    int L = 50;
+                    int L = Lvec[0];
 
                     index->search_ret_route(
                             i,
@@ -433,7 +437,7 @@ template <typename T, typename LabelT = uint32_t>
                 index->add_neighbor_dual(p.first, p.second);
             add_edge_pairs.clear();
 
-            index->save((index_path + "_train_" + std::to_string(L) + "_" + delta_str).c_str(), false);
+            index->save((index_path + "_train_TL" + std::to_string(L) + "_TR" + std::to_string(topk_num) + "_" + delta_str).c_str(), false);
         }
 
         if (print_all_recalls) {
@@ -489,7 +493,7 @@ int main(int argc, char **argv) {
 
     std::string data_type, index_path_prefix, query_file, gt_file, filter_label, result_path,
     label_type, query_filters_file;
-    uint32_t num_threads, K, train_L, topk_num, build_L, build_R;
+    uint32_t num_threads, K, train_L, topk_num, build_L, build_R, train_R;
     std::vector<uint32_t> Lvec;
     std::vector<std::string> query_filters;
     bool is_train, is_eval, is_validate;
@@ -504,6 +508,7 @@ int main(int argc, char **argv) {
     train_L = 50;
     build_L = 50;
     build_R = 32;
+    train_R = 5;
     is_train = false;
     is_eval = false;
     is_validate = false;
@@ -547,7 +552,10 @@ int main(int argc, char **argv) {
     if (argc >= 14) {
         delta_str = std::string(argv[13]);
     }
-    topk_num = build_R;
+    if (argc >= 14) {
+        train_R = std::stoi(argv[14]);
+    }
+    topk_num = train_R;
 
 
     diskann::Metric metric;
@@ -576,12 +584,14 @@ int main(int argc, char **argv) {
             "_learn_R" + std::to_string(build_R) + "_L" + std::to_string(build_L) + "_A" + build_A;
 
     if (is_eval or is_validate) {
-        index_path_prefix = index_path_prefix + "_train_" + std::to_string(train_L) + "_" + delta_str;
+        index_path_prefix = index_path_prefix + "_train_TL" + std::to_string(train_L) +
+                "_TR" + std::to_string(train_R) + "_" + delta_str;
     }
 
 
     query_file = data_prefix + "/" + dataset + "_query.fbin";
     gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
+    std::string base_file = data_prefix + "/" + dataset + "_learn.fbin";
 
     if (is_train or is_validate) {
         query_file = data_prefix + "/" + dataset + "_train.fbin";
@@ -593,13 +603,14 @@ int main(int argc, char **argv) {
 
     num_threads = 56;
     if (not is_train) {
-        for (int i = 100; i <= 500; i+=100){
+        for (int i = 20; i <= 100; i+=20){
             Lvec.push_back(i);
         }
     } else {
         Lvec.assign({train_L});
     }
+
     same_node_test<float>(metric, index_path_prefix, query_file, gt_file,
-                          num_threads, K, Lvec,
+                          num_threads, K, Lvec, base_file,
                           is_train, is_validate or is_eval, topk_num, delta_str);
 }

@@ -886,7 +886,7 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
     {
         auto nbr = best_L_nodes.closest_unexpanded();
         auto n = nbr.id;
-        scratch->route().push_back(n);
+//        scratch->route().push_back(n);
         hops += 1;
         // Add node to expanded nodes to create pool for prune later
         if (!search_invocation)
@@ -2345,7 +2345,7 @@ DISKANN_DLLEXPORT std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::search_r
             iterate_to_fixed_point(scratch->aligned_query(), L, init_ids, scratch, false, unused_filter_label, true);
 
     /**********/
-    route.assign(scratch->route().begin(), scratch->route().end());
+//    route.assign(scratch->route().begin(), scratch->route().end());
     scratch->route().clear();
     scratch->route().shrink_to_fit();
     /**********/

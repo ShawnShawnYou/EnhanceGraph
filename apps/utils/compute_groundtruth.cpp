@@ -28,12 +28,15 @@
 #endif
 #include "filter_utils.h"
 #include "utils.h"
-
+#include <signal.h>
 // WORKS FOR UPTO 2 BILLION POINTS (as we use INT INSTEAD OF UNSIGNED)
 
 #define PARTSIZE 10000000
 #define ALIGNMENT 512
-
+void handle_sigterm(int sig)
+{
+    std::cout << "Received SIGTERM, not terminating." << std::endl;
+}
 // custom types (for readability)
 typedef tsl::robin_set<std::string> label_set;
 typedef std::string path;
@@ -489,6 +492,9 @@ void load_truthset(const std::string &bin_file, uint32_t *&ids, float *&dists, s
 
 int main(int argc, char **argv)
 {
+    struct sigaction sa;
+    sa.sa_handler = &handle_sigterm;
+    sigaction(SIGTERM, &sa, NULL);
     std::string data_type, dist_fn, base_file, query_file, gt_file, tags_file;
     uint64_t K;
 
