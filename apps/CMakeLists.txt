@@ -34,6 +34,9 @@ target_link_libraries(train_memory_index ${PROJECT_NAME} ${DISKANN_TOOLS_TCMALLO
 add_executable(experiment_memory_index experiment_memory_index.cpp)
 target_link_libraries(experiment_memory_index ${PROJECT_NAME} ${DISKANN_TOOLS_TCMALLOC_LINK_OPTIONS} Boost::program_options)
 
+add_executable(statistic_memory_index statistic_memory_index.cpp)
+target_link_libraries(statistic_memory_index ${PROJECT_NAME} ${DISKANN_TOOLS_TCMALLOC_LINK_OPTIONS} Boost::program_options)
+
 if (NOT MSVC)
     install(TARGETS build_memory_index
             build_stitched_index
@@ -45,6 +48,7 @@ if (NOT MSVC)
             test_insert_deletes_consolidate
             train_memory_index
             experiment_memory_index
+            statistic_memory_index
             RUNTIME
     )
 endif()

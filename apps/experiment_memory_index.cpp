@@ -98,9 +98,25 @@ template <typename T, typename LabelT = uint32_t>
     std::unordered_map<uint32_t, uint32_t> our_map;                                 // key: query id    value: our_nn_id
     std::unordered_map<uint32_t, std::vector<uint32_t>> route_map;                  // key: query id    value: route
 
+    if (print_all_recalls) {
+        std::cout << "Using " << num_threads << " threads to search" << std::endl;
+        std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
+        std::cout.precision(2);
+        std::cout << std::setw(4) << "Ls" << std::setw(12) << qps_title << std::setw(18) << "Avg dist cmps"
+        << std::setw(20) << "Mean Latency (mus)" << std::setw(15) << "99.9 Latency";
+        table_width += 4 + 12 + 18 + 20 + 15;
+        for (uint32_t curr_recall = first_recall; curr_recall <= recall_at; curr_recall++)
+        {
+            std::cout << std::setw(12) << ("Recall@" + std::to_string(curr_recall));
+        }
+        recalls_to_print = recall_at + 1 - first_recall;
+        table_width += recalls_to_print * 12;
+        std::cout << std::endl;
+        std::cout << std::string(table_width, '=') << std::endl;
+    }
 
-    bool is_calculate_middle = is_train;
-    if (is_calculate_middle and use_cached_top1) {
+    bool is_calculate_middle = true;
+    if (is_train and is_calculate_middle) {
         // 根据50个topk的结果来生成query，每个topk生成10个
         // 500个结果看看能收敛到哪里
         size_t read_blk_size = 64 * 1024 * 1024;
@@ -136,7 +152,7 @@ template <typename T, typename LabelT = uint32_t>
 
                 std::vector<std::pair<uint32_t, float>> full_adj;
                 for (int k = 0; k < dual_adj_list.size(); k++) {
-                    uint32_t topk_id = dual_adj_list[k + top_k_start];
+                    uint32_t topk_id = dual_adj_list[k];
                     float distance = index->get_distance(base_data, topk_id);
                     full_adj.emplace_back(topk_id, distance);
                 }
@@ -233,7 +249,7 @@ template <typename T, typename LabelT = uint32_t>
 
                 std::vector<std::pair<uint32_t, float>> full_adj;
                 for (int k = 0; k < dual_adj_list.size(); k++) {
-                    uint32_t topk_id = dual_adj_list[k + top_k_start];
+                    uint32_t topk_id = dual_adj_list[k];
                     float distance = index->get_distance(base_data, topk_id);
                     full_adj.emplace_back(topk_id, distance);
                 }
@@ -335,22 +351,7 @@ template <typename T, typename LabelT = uint32_t>
 
 
 
-    if (print_all_recalls) {
-        std::cout << "Using " << num_threads << " threads to search" << std::endl;
-        std::cout.setf(std::ios_base::fixed, std::ios_base::floatfield);
-        std::cout.precision(2);
-        std::cout << std::setw(4) << "Ls" << std::setw(12) << qps_title << std::setw(18) << "Avg dist cmps"
-        << std::setw(20) << "Mean Latency (mus)" << std::setw(15) << "99.9 Latency";
-        table_width += 4 + 12 + 18 + 20 + 15;
-        for (uint32_t curr_recall = first_recall; curr_recall <= recall_at; curr_recall++)
-        {
-            std::cout << std::setw(12) << ("Recall@" + std::to_string(curr_recall));
-        }
-        recalls_to_print = recall_at + 1 - first_recall;
-        table_width += recalls_to_print * 12;
-        std::cout << std::endl;
-        std::cout << std::string(table_width, '=') << std::endl;
-    }
+
 
 
     double best_recall = 0.0;
@@ -401,29 +402,14 @@ template <typename T, typename LabelT = uint32_t>
 
                 std::vector<diskann::location_t> gt_id_vec(gt_id_vec_start,gt_id_vec_start + (uint32_t)recall_at);
                 std::vector<float> gt_dist_vec(gt_dist_vec_start,gt_dist_vec_start + (uint32_t)recall_at);
-                #pragma omp critical
-                {
-                    route_map[i] = route;
-                    gt_map[i] = gt_nn_id;
-                    our_map[i] = our_nn_id;
 
-                    //                if (test_id == 0) {
-                    //                    gt_nn_query_id_map[gt_nn_id].push_back(i);
-                    //                    our_nn_query_id_map[our_nn_id].push_back(i);
-                    //                    lid += *(gt_dist_vec_start + 49);
-                    //                    if (*(gt_dist_vec_start + 49) > max_distance) {
-                    //                        max_distance = *(gt_dist_vec_start + 49);
-                    //                    }
-                    //                }
-
-                    if (test_id == 0) {
-                        if (our_nn_id != gt_nn_id) {
-                            add_edge_pairs.insert({our_nn_id, gt_nn_id});
-                        }
-
+                if (test_id == 0 and our_nn_id != gt_nn_id) {
+                    #pragma omp critical
+                    {
+                        add_edge_pairs.insert({our_nn_id, gt_nn_id});
                     }
-
                 }
+
             }
 
 
@@ -503,10 +489,10 @@ int main(int argc, char **argv) {
     std::string algo_name = "VAMANA";
     std::string dist_fn = "l2";
     std::string build_A = "1.2";
-    std::string delta_str = "0.6";
+    std::string delta_str = "0.51";
     K = 10;
     train_L = 50;
-    build_L = 50;
+    build_L = 100;
     build_R = 32;
     train_R = 5;
     is_train = false;
@@ -589,21 +575,23 @@ int main(int argc, char **argv) {
     }
 
 
-    query_file = data_prefix + "/" + dataset + "_query.fbin";
-    gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
+    query_file = data_prefix + "/" + dataset + "_gen_query.fbin";
+    gt_file = data_prefix + "/" + dataset + "_gen_query_learn_gt100";
     std::string base_file = data_prefix + "/" + dataset + "_learn.fbin";
 
     if (is_train or is_validate) {
         query_file = data_prefix + "/" + dataset + "_train.fbin";
         gt_file = data_prefix + "/" + dataset + "_train_learn_gt100";
     } else if (is_eval) {
-        query_file = data_prefix + "/" + dataset + "_query.fbin";
-        gt_file = data_prefix + "/" + dataset + "_query_learn_gt100";
+        query_file = data_prefix + "/" + dataset + "_gen_query.fbin";
+        gt_file = data_prefix + "/" + dataset + "_gen_query_learn_gt100";
     }
 
     num_threads = 56;
+    if (is_train)
+        num_threads = 112;
     if (not is_train) {
-        for (int i = 20; i <= 100; i+=20){
+        for (int i = 20; i <= 100; i+=10){
             Lvec.push_back(i);
         }
     } else {

@@ -121,9 +121,10 @@ void generate_random_data_based_on_origin(std::string base_data_path, std::strin
     int datasize = sizeof(float);
     size_t ndims = (size_t)ndims_u32;
     size_t npts = fsize / ((ndims * datasize) + sizeof(uint32_t));
+    npts = std::min(npts, (size_t)1000000);
 
     uint8_t *read_buf = new uint8_t[npts * ((ndims * datasize) + sizeof(uint32_t))];
-    reader.read((char *)read_buf, (npts + jump_npts) * (ndims * sizeof(float) + sizeof(uint32_t)));
+    reader.read((char *)read_buf, (npts) * (ndims * sizeof(float) + sizeof(uint32_t)));
 
 
     size_t npts_generated = num_copy * num_base;
@@ -144,7 +145,9 @@ void generate_random_data_based_on_origin(std::string base_data_path, std::strin
     }
     avg_dim /= sampled_base_num;
 
-    avg_dim /= 10.0;
+
+    avg_dim /= 2.5;
+
 
 
     std::random_device rd;
@@ -193,6 +196,7 @@ int main(int argc, char **argv)
     size_t target_npts = 0;
     size_t jump_npts = 0;
     int is_generate = 0;
+    size_t generate_npts = 10000;
 
     if (argc < 4)
     {
@@ -205,8 +209,9 @@ int main(int argc, char **argv)
         jump_npts = std::stoi(argv[5]);
     if (argc >= 7)
         is_generate = std::stoi(argv[6]);
+    if (argc >= 8)
+        generate_npts = std::stoi(argv[7]);
 
-    jump_npts = 0;
 
     int datasize = sizeof(float);
 
@@ -235,7 +240,7 @@ int main(int argc, char **argv)
     std::cout << "Dataset: #pts = " << npts << ", # dims = " << ndims << std::endl;
 
     if (is_generate != 0) {
-        generate_random_data_based_on_origin(argv[2], argv[3], npts);
+        generate_random_data_based_on_origin(argv[2], argv[3], generate_npts, 1, jump_npts);
         return 0;
     }
 

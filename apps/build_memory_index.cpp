@@ -188,7 +188,16 @@ int main(int argc, char **argv)
 
         std::unordered_map<std::string, float> tau_map = {
                 {"sift1m", 10},
-                {"gist1m", 0.04}
+                {"gist1m", 0.04},
+                {"sift-128-euclidean", 10},
+                {"gist-960-euclidean", 0.04},
+                {"deep-image-96-angular", 0.04},
+                {"glove-100-angular", 0.2},
+                {"glove-200-angular", 0.4},
+
+                {"fashion-mnist-784-euclidean", 0.4},
+                {"kosarak-jaccard", 0.4},
+                {"mnist-784-euclidean", 0.4}
         };
 
 

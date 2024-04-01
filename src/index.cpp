@@ -1035,8 +1035,8 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
         auto adj_list = _dual_graph_store->get_neighbours(our_best_nn_id);
 
         for (auto adj : adj_list) {
-            if (_data_store->get_distance(query, adj) < _data_store->get_distance(query, best_L_nodes[best_L_nodes.size() - 1].id)) {
-            }
+//            if (_data_store->get_distance(query, adj) < _data_store->get_distance(query, best_L_nodes[best_L_nodes.size() - 1].id)) {
+//            }
 
             if (best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)))) {
                 valid_insert ++;

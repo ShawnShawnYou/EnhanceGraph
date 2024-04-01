@@ -355,6 +355,11 @@ std::vector<std::vector<std::pair<uint32_t, float>>> processUnfilteredParts(cons
         size_t *closest_points_part = new size_t[nqueries * k];
         float *dist_closest_points_part = new float[nqueries * k];
 
+//        auto dist_fn = new diskann::DistanceCosineFloat();
+//        auto distance1 = dist_fn->compare(query_data, base_data + 10000 * dim, dim);
+//        auto distance2 = dist_fn->compare(query_data, base_data + 10400 * dim, dim);
+
+
         auto part_k = k < npoints ? k : npoints;
         exact_knn(dim, part_k, closest_points_part, dist_closest_points_part, npoints, base_data, nqueries, query_data,
                   metric);
