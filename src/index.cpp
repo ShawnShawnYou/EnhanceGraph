@@ -980,13 +980,47 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
     }
 
     if (use_cached_top1) {
-        diskann::location_t our_best_nn_id = best_L_nodes[0].id;
-        auto top1_adj_list = _dual_graph_store->get_neighbours(our_best_nn_id);
 
-        for (auto adj : top1_adj_list) {
-            best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)));
+        for (int i = 0; i < 2; i++) {
+            diskann::location_t our_best_nn_id = best_L_nodes[0].id;
+            auto top1_adj_list = _dual_graph_store->get_neighbours(our_best_nn_id);
+
+            bool success_insert = false;
+
+            if (use_aknng_enhancement) {
+                for (auto adj : top1_adj_list) {
+                    success_insert = best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)));
+                    if (success_insert) {
+                        inter_aknng_final_count++;
+                    }
+                }
+            } else {
+                float min_distance = 100000;
+                diskann::location_t min_id = -1;
+
+                for (auto adj : top1_adj_list) {
+                    float tmp_distance = _data_store->get_distance(query, adj);
+                    if (tmp_distance < min_distance and adj != our_best_nn_id) {
+                        min_distance = tmp_distance;
+                        min_id = adj;
+                    }
+                }
+                success_insert = best_L_nodes.insert(Neighbor(min_id, min_distance));
+                if (success_insert) {
+                    inter_aknng_final_count++;
+                }
+            }
+
+            diskann::location_t new_top1_id = best_L_nodes[0].id;
+            if (our_best_nn_id != new_top1_id) {
+                continue;
+            } else{
+                break;
+            }
         }
+
     }
+
 
     if (use_knn_graph) {
         std::vector<diskann::location_t> base_gt_id_vec;

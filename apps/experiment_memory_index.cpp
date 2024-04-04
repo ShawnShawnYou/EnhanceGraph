@@ -47,7 +47,8 @@ template <typename T, typename LabelT = uint32_t>
                            const std::string &query_file, const std::string &truthset_file, const uint32_t num_threads,
                            const uint32_t recall_at, const std::vector<uint32_t> &Lvec,
                            const std::string &base_file,
-                           const bool is_train, const bool use_cached_top1, int topk_num=5, std::string delta_str="0.51") {
+                           const bool is_train, const bool use_cached_top1, int topk_num=5, std::string delta_str="0.51",
+                           int eval_mode = -1) {
 
     // dim and num
     using TagT = uint32_t;
@@ -84,6 +85,9 @@ template <typename T, typename LabelT = uint32_t>
     auto index = index_factory.create_instance();
     index->load(index_path.c_str(), num_threads, *(std::max_element(Lvec.begin(), Lvec.end())));
     index->use_cached_top1 = use_cached_top1;
+    if (use_cached_top1) {
+        index->use_aknng_enhancement = (eval_mode == 1);
+    }
 
     // start query
     std::vector<std::vector<uint32_t>> query_result_ids(Lvec.size());
@@ -480,6 +484,7 @@ int main(int argc, char **argv) {
     std::string data_type, index_path_prefix, query_file, gt_file, filter_label, result_path,
     label_type, query_filters_file;
     uint32_t num_threads, K, train_L, topk_num, build_L, build_R, train_R;
+    int eval_mode = -1;
     std::vector<uint32_t> Lvec;
     std::vector<std::string> query_filters;
     bool is_train, is_eval, is_validate;
@@ -505,7 +510,7 @@ int main(int argc, char **argv) {
         is_train = std::stoi(argv[2]) != 0;
     }
     if (argc >= 4) {
-        is_eval = std::stoi(argv[3]) != 0;
+        eval_mode = std::stoi(argv[3]);
     }
     if (argc >= 5) {
         is_validate = std::stoi(argv[4]) != 0;
@@ -542,6 +547,7 @@ int main(int argc, char **argv) {
         train_R = std::stoi(argv[14]);
     }
     topk_num = train_R;
+    is_eval = eval_mode != 0;
 
 
     diskann::Metric metric;
@@ -591,7 +597,7 @@ int main(int argc, char **argv) {
     if (is_train)
         num_threads = 112;
     if (not is_train) {
-        for (int i = 20; i <= 100; i+=10){
+        for (int i = 20; i <= 200; i+=10){
             Lvec.push_back(i);
         }
     } else {
@@ -600,5 +606,5 @@ int main(int argc, char **argv) {
 
     same_node_test<float>(metric, index_path_prefix, query_file, gt_file,
                           num_threads, K, Lvec, base_file,
-                          is_train, is_validate or is_eval, topk_num, delta_str);
+                          is_train, is_validate or is_eval, topk_num, delta_str, eval_mode);
 }

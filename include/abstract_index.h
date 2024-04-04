@@ -44,6 +44,7 @@ class AbstractIndex
     bool use_many_knn_graph = false;
     bool use_extra_search = false;
     bool use_cached_top1 = true;
+    bool use_aknng_enhancement = false;
 
     enum prune_strategy {
         VAMANA = 0,
