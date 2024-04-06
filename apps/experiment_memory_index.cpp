@@ -87,6 +87,7 @@ template <typename T, typename LabelT = uint32_t>
     index->use_cached_top1 = use_cached_top1;
     if (use_cached_top1) {
         index->use_aknng_enhancement = (eval_mode == 1);
+        index->use_only_build_info = (eval_mode == 3);
     }
 
     // start query
@@ -422,6 +423,8 @@ template <typename T, typename LabelT = uint32_t>
             latency_stats[i] = (float)(diff.count() * 1000000);
         }
 
+        std::cout << index->valid_insert << " " << query_num << std::endl;
+
         if (is_train && test_id == 0) {
             for (auto p : add_edge_pairs)
                 index->add_neighbor_dual(p.first, p.second);
@@ -543,7 +546,7 @@ int main(int argc, char **argv) {
     if (argc >= 14) {
         delta_str = std::string(argv[13]);
     }
-    if (argc >= 14) {
+    if (argc >= 15) {
         train_R = std::stoi(argv[14]);
     }
     topk_num = train_R;
@@ -604,7 +607,13 @@ int main(int argc, char **argv) {
         Lvec.assign({train_L});
     }
 
+    auto s = std::chrono::high_resolution_clock::now();
+
     same_node_test<float>(metric, index_path_prefix, query_file, gt_file,
                           num_threads, K, Lvec, base_file,
                           is_train, is_validate or is_eval, topk_num, delta_str, eval_mode);
+
+    auto e = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = e - s;
+    std::cout << "Training or Searching time: " << diff.count() << std::endl;
 }

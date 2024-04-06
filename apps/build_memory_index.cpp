@@ -35,7 +35,7 @@ int main(int argc, char **argv)
     sa.sa_handler = &handle_sigterm;
     sigaction(SIGTERM, &sa, NULL);
 
-    std::string data_type, dist_fn, data_path, index_path_prefix, label_file, universal_label, label_type;
+    std::string data_type, dist_fn, data_path, index_path_prefix, label_file, universal_label, label_type, result_path;
     std::string algo_name, dataset_name;
     uint32_t num_threads, R, L, Lf, build_PQ_bytes;
     float alpha;
@@ -55,6 +55,8 @@ int main(int argc, char **argv)
                                        program_options_utils::DISTANCE_FUNCTION_DESCRIPTION);
         required_configs.add_options()("index_path_prefix", po::value<std::string>(&index_path_prefix)->required(),
                                        program_options_utils::INDEX_PATH_PREFIX_DESCRIPTION);
+        required_configs.add_options()("result_path", po::value<std::string>(&result_path)->required(),
+                program_options_utils::INDEX_PATH_PREFIX_DESCRIPTION);
         required_configs.add_options()("data_path", po::value<std::string>(&data_path)->required(),
                                        program_options_utils::INPUT_DATA_PATH);
         required_configs.add_options()("algorithm", po::value<std::string>(&algo_name)->required(),
@@ -106,6 +108,8 @@ int main(int argc, char **argv)
         std::cerr << ex.what() << '\n';
         return -1;
     }
+
+    freopen(result_path.c_str(), "w", stdout);
 
     diskann::Metric metric;
     if (dist_fn == std::string("mips"))

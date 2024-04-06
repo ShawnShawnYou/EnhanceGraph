@@ -40,11 +40,12 @@ class AbstractIndex
   public:
     // setting
     bool use_bfs = false;
-    bool use_knn_graph = true;
+    bool use_knn_graph = false;
     bool use_many_knn_graph = false;
     bool use_extra_search = false;
     bool use_cached_top1 = true;
     bool use_aknng_enhancement = false;
+    bool use_only_build_info = false;
 
     enum prune_strategy {
         VAMANA = 0,
@@ -58,8 +59,7 @@ class AbstractIndex
 
 
     // build setting
-    int AKNNG_R = 32;   // AKNNG degree limit R
-    int AKNNG_L = 100;   // AKNNG build search parameter L
+
     bool is_random_select_aknng_neighbor = false;
 
     // count result

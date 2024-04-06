@@ -991,12 +991,49 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
                 for (auto adj : top1_adj_list) {
                     success_insert = best_L_nodes.insert(Neighbor(adj, _data_store->get_distance(query, adj)));
                     if (success_insert) {
-                        inter_aknng_final_count++;
+                        #pragma omp critical
+                        {
+                            valid_insert++;
+                        };
                     }
                 }
+            } else if (use_only_build_info) {
+                if (top1_adj_list.empty())
+                    break;
+
+                std::vector<std::pair<uint32_t, float>> distance_list;
+                distance_list.reserve(top1_adj_list.size());
+
+                float min_distance = _data_store->get_distance(query, top1_adj_list[0]);
+                diskann::location_t min_id = top1_adj_list[0];
+                for (auto adj : top1_adj_list) {
+                    float tmp_distance = _data_store->get_distance(query, adj);
+                    distance_list.emplace_back(adj, tmp_distance);
+                    if (tmp_distance < min_distance and adj != our_best_nn_id) {
+                        min_distance = tmp_distance;
+                        min_id = adj;
+                    }
+                }
+
+                for (auto p : distance_list) {
+                    if (p.first == min_id)
+                        continue;
+                    success_insert = best_L_nodes.insert(Neighbor(p.first, p.second));
+                    if (success_insert) {
+                    #pragma omp critical
+                        {
+                            valid_insert++;
+                        };
+                    }
+                }
+
+                break;
             } else {
-                float min_distance = 100000;
-                diskann::location_t min_id = -1;
+                if (top1_adj_list.empty())
+                    break;
+
+                float min_distance = _data_store->get_distance(query, top1_adj_list[0]);
+                diskann::location_t min_id = top1_adj_list[0];
 
                 for (auto adj : top1_adj_list) {
                     float tmp_distance = _data_store->get_distance(query, adj);
@@ -1007,7 +1044,10 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
                 }
                 success_insert = best_L_nodes.insert(Neighbor(min_id, min_distance));
                 if (success_insert) {
-                    inter_aknng_final_count++;
+                    #pragma omp critical
+                    {
+                        valid_insert++;
+                    };
                 }
             }
 
@@ -1217,13 +1257,13 @@ void Index<T, TagT, LabelT>::search_for_point_and_prune(int location, uint32_t L
 
         std::shuffle(indices.begin(), indices.end(), g);
 
-        indices.resize(AKNNG_R);
+        indices.resize(_indexingRange);
 
         for (int i : indices) {
             original_list.push_back(scratch->best_l_nodes()[i].id);
         }
     } else {
-        for (int i = 0; i < AKNNG_R and i < scratch->best_l_nodes().size(); i++) {   // fixed bug: 不应该使用pool pool是无序的 没啥关系
+        for (int i = 0; i < _indexingRange and i < scratch->best_l_nodes().size(); i++) {   // fixed bug: 不应该使用pool pool是无序的 没啥关系
             original_list.push_back(scratch->best_l_nodes()[i].id);
         }
     }
@@ -1477,7 +1517,8 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
 
     diskann::Timer link_timer;
 
-#pragma omp parallel for schedule(dynamic, 2048)
+    // 第一遍构建
+    #pragma omp parallel for schedule(dynamic, 2048)
     for (int64_t node_ctr = 0; node_ctr < (int64_t)(visit_order.size()); node_ctr++)
     {
         auto node = visit_order[node_ctr];
@@ -1514,6 +1555,9 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
     }
 
 
+//    omp_set_num_threads(1);
+    auto s = std::chrono::high_resolution_clock::now();
+    // 第二遍构建
     #pragma omp parallel for schedule(dynamic, 2048)
     for (int64_t node_ctr = 0; node_ctr < (int64_t)(visit_order.size()); node_ctr++)
     {
@@ -1526,12 +1570,12 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
         std::vector<uint32_t> pruned_list;
         if (_filtered_index)
         {
-            search_for_point_and_prune(node, AKNNG_L, pruned_list, original_list, scratch, _filtered_index,
+            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, original_list, scratch, _filtered_index,
                                        _filterIndexingQueueSize);
         }
         else
         {
-            search_for_point_and_prune(node, AKNNG_L, pruned_list, original_list, scratch); // todo key
+            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, original_list, scratch); // todo key
         }
         {
             LockGuard guard(_locks[node]);
@@ -1543,13 +1587,60 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
             diskann::cout << "\r" << (100.0 * node_ctr) / (visit_order.size()) << "% of index build completed."
             << std::flush;
         }
+
+
+        if (strategy == TAUMNG) {
+            std::vector<uint32_t> new_out_neighbors(_graph_store->get_neighbours(node).begin(), _graph_store->get_neighbours(node).end());
+
+            std::unordered_set<location_t> already_neighbors(_graph_store->get_neighbours(node).begin(), _graph_store->get_neighbours(node).end());
+
+            for (auto candidate_id : original_list) {
+                if (candidate_id == node)
+                    continue;
+
+
+                if (already_neighbors.find(candidate_id) != already_neighbors.end())
+                    continue;
+
+                if (new_out_neighbors.size() + 1 >= _indexingRange)
+                    break;
+
+                float candidate_distance = get_distance(node, candidate_id);
+                if (candidate_distance < tau) {
+                    new_out_neighbors.push_back(candidate_id);
+                    already_neighbors.insert(candidate_id);
+                } else {
+                    bool is_add_edge = true;
+                    for (auto neighbor_id : new_out_neighbors) {
+                        bool condition_1 = get_distance(node, neighbor_id) < candidate_distance;
+                        bool condition_2 = get_distance(candidate_id, neighbor_id) < candidate_distance - 3 * tau;
+                        if (condition_1 and condition_2) {
+                            is_add_edge = false;
+                            break;
+                        }
+                    }
+                    if (is_add_edge) {
+                        new_out_neighbors.push_back(candidate_id);
+                        already_neighbors.insert(candidate_id);
+                    }
+                }
+            }
+
+            _graph_store->clear_neighbours((location_t)node);
+            _graph_store->set_neighbours((location_t)node, new_out_neighbors);
+
+        }
     }
+
+    auto e = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> diff = e - s;
+    diskann::cout << std::endl << "Dual Graph Indexing time: " << diff.count() << std::endl;
 
     if (_nd > 0)
     {
         diskann::cout << "Starting final cleanup.." << std::flush;
     }
-#pragma omp parallel for schedule(dynamic, 2048)
+    #pragma omp parallel for schedule(dynamic, 2048)
     for (int64_t node_ctr = 0; node_ctr < (int64_t)(visit_order.size()); node_ctr++)
     {
         auto node = visit_order[node_ctr];
@@ -1573,39 +1664,6 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
             }
             prune_neighbors(node, dummy_pool, new_out_neighbors, scratch);
 
-            if (strategy == TAUMNG) {
-                std::vector<Neighbor> backup_pool(dummy_pool);
-                std::unordered_set<location_t> already_neighbors(new_out_neighbors.begin(), new_out_neighbors.end());
-
-                for (auto candidate : backup_pool) {
-                    if (already_neighbors.find(candidate.id) != already_neighbors.end())
-                        continue;
-
-                    if (new_out_neighbors.size() >= _indexingRange)
-                        break;
-
-                    if (candidate.distance < tau) {
-                        new_out_neighbors.push_back(candidate.id);
-                        already_neighbors.insert(candidate.id);
-                    } else {
-                        bool is_add_edge = true;
-                        for (auto neighbor_id : new_out_neighbors) {
-                            bool condition_1 = get_distance(node, neighbor_id) < candidate.distance;
-                            bool condition_2 = get_distance(candidate.id, neighbor_id) < candidate.distance - 3 * tau;
-                            if (condition_1 and condition_2) {
-                                is_add_edge = false;
-                                break;
-                            }
-                        }
-                        if (is_add_edge) {
-                            new_out_neighbors.push_back(candidate.id);
-                            already_neighbors.insert(candidate.id);
-                        }
-                    }
-                }
-            }
-
-
             _graph_store->clear_neighbours((location_t)node);
             _graph_store->set_neighbours((location_t)node, new_out_neighbors);
 
@@ -1616,17 +1674,29 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
 
             std::vector<uint32_t> dual_neighbors;
             for (auto neighbor : full_neighbors) {
-                if (proximity_neighbor_set.find(neighbor) == proximity_neighbor_set.end()) {
+                if (neighbor != node and proximity_neighbor_set.find(neighbor) == proximity_neighbor_set.end()) {
                     dual_neighbors.emplace_back(neighbor);
                     proximity_neighbor_set.insert(neighbor);
                 }
             }
 
+//            if (dual_neighbors.size() + _graph_store->get_neighbours((location_t)node).size() > _indexingRange or
+//            _graph_store->get_neighbours((location_t)node).size() > _indexingRange) {
+//                std::cout << std::endl;
+//                std::cout
+//                << node << " "
+//                << dual_neighbors.size() << " "
+//                << _graph_store->get_neighbours((location_t)node).size() << " "
+//                << full_neighbors.size() << std::endl;
+//                exit(0);
+//            };
+
             _dual_graph_store->clear_neighbours((location_t)node);
             _dual_graph_store->set_neighbours((location_t)node, dual_neighbors);
-
         }
+
     }
+
     if (_nd > 0)
     {
         diskann::cout << "done. Link time: " << ((double)link_timer.elapsed() / (double)1000000) << "s" << std::endl;
@@ -1809,6 +1879,19 @@ void Index<T, TagT, LabelT>::build_with_data_populated(const std::vector<TagT> &
     size_t max = 0, min = SIZE_MAX, total = 0, cnt = 0;
     for (size_t i = 0; i < _nd; i++)
     {
+        auto &pool = _dual_graph_store->get_neighbours((location_t)i);
+        max = std::max(max, pool.size());
+        min = std::min(min, pool.size());
+        total += pool.size();
+        if (pool.size() < 2)
+            cnt++;
+    }
+    diskann::cout << "Dual Graph built with degree: max:" << max << "  avg:" << (float)total / (float)(_nd + _num_frozen_pts)
+    << "  min:" << min << "  count(deg<2):" << cnt << std::endl;
+
+    max = 0; min = SIZE_MAX; total = 0; cnt = 0;
+    for (size_t i = 0; i < _nd; i++)
+    {
         auto &pool = _graph_store->get_neighbours((location_t)i);
         max = std::max(max, pool.size());
         min = std::min(min, pool.size());
@@ -1816,7 +1899,7 @@ void Index<T, TagT, LabelT>::build_with_data_populated(const std::vector<TagT> &
         if (pool.size() < 2)
             cnt++;
     }
-    diskann::cout << "Index built with degree: max:" << max << "  avg:" << (float)total / (float)(_nd + _num_frozen_pts)
+    diskann::cout << "Proximity Graph built with degree: max:" << max << "  avg:" << (float)total / (float)(_nd + _num_frozen_pts)
                   << "  min:" << min << "  count(deg<2):" << cnt << std::endl;
 
     _has_built = true;
