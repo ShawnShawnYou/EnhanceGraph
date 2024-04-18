@@ -653,7 +653,7 @@ int main(int argc, char **argv) {
     }
 
 
-    std::string root_dir = "/root/xiaoyao_zhong/";
+    std::string root_dir = "/root/";
     std::string data_prefix = root_dir + "dataset/data/" + dataset;
     index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset + "_learn_R32_L50_A1.2";
 
