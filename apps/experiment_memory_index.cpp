@@ -120,7 +120,7 @@ template <typename T, typename LabelT = uint32_t>
         std::cout << std::string(table_width, '=') << std::endl;
     }
 
-    bool is_calculate_middle = false;
+    bool is_calculate_middle = true;
     if (is_train and is_calculate_middle) {
         // 根据50个topk的结果来生成query，每个topk生成10个
         // 500个结果看看能收敛到哪里
@@ -376,8 +376,7 @@ template <typename T, typename LabelT = uint32_t>
         std::set<std::pair<diskann::location_t, diskann::location_t>> add_edge_pairs;
         float lid = 0, max_distance = 0;  // computed by 50-th NN
 
-//        if (is_train)
-//            query_num = 0;
+
         auto s = std::chrono::high_resolution_clock::now();
         omp_set_num_threads(num_threads);
 #pragma omp parallel for schedule(dynamic, 1)
@@ -574,7 +573,7 @@ int main(int argc, char **argv) {
                      << std::endl;
         return -1;
     }
-    std::string root_dir = "/root/";
+    std::string root_dir = "/root/xiaoyao_zhong/";
     std::string data_prefix = root_dir + "dataset/data/" + dataset;
     index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset +
             "_learn_R" + std::to_string(build_R) + "_L" + std::to_string(build_L) + "_A" + build_A;
@@ -601,13 +600,12 @@ int main(int argc, char **argv) {
     if (is_train)
         num_threads = 112;
     if (not is_train) {
-        for (int i = 30; i <= 300; i+=30){
+        for (int i = 20; i <= 200; i+=10){
             Lvec.push_back(i);
         }
     } else {
         Lvec.assign({train_L});
     }
-    Lvec.assign({train_L});
 
     auto s = std::chrono::high_resolution_clock::now();
 
