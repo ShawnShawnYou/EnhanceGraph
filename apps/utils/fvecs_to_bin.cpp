@@ -134,9 +134,6 @@ void generate_random_data_based_on_origin(std::string base_data_path, std::strin
     float *write_buf = new float[npts_generated * ndims * datasize];
 
     float avg_dim = 0;
-    float base_avg_distance = 0;
-    float avg_distance_per_dim = 0;
-    int count_pair = 0;
     for (int i = 0; i < sampled_base_num; i++) {
         float* query = ((float*)read_buf + (i) * (ndims + 1)) + 1;
 
@@ -145,37 +142,8 @@ void generate_random_data_based_on_origin(std::string base_data_path, std::strin
             tmp += *(query + dim);
         }
         avg_dim += (tmp / (float)ndims);
-
-
-        for (int j = 0; j < 1000; j++) {
-            if (i == j)
-                continue;
-            count_pair++;
-            float* base = ((float*)read_buf + (j) * (ndims + 1)) + 1;
-
-            float distance = 0;
-            for (int dim = 0; dim < ndims; dim++) {
-                distance += (query[dim] - base[dim]) * (query[dim] - base[dim]);
-            }
-            base_avg_distance += distance;
-        }
-
-        for (int j = 0; j < 1000; j++) {
-            if (i == j)
-                continue;
-            count_pair++;
-            float* base = ((float*)read_buf + (j) * (ndims + 1)) + 1;
-
-            float distance_per_dim = 0;
-            for (int dim = 0; dim < ndims; dim++) {
-                distance_per_dim += std::fabs(query[dim] - base[dim]);
-            }
-            avg_distance_per_dim += (distance_per_dim / (1.0 * ndims));
-        }
     }
     avg_dim /= sampled_base_num;
-    base_avg_distance /= (1.0 * count_pair);
-    avg_distance_per_dim /= (1.0 * count_pair);
 
 
     avg_dim /= 2.5;
@@ -186,8 +154,6 @@ void generate_random_data_based_on_origin(std::string base_data_path, std::strin
     std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(-1 * avg_dim, avg_dim);
 
-    num_base = 1;
-    num_copy = 10000;
     for (int i = 0; i < num_base; i++) {
         float* query = ((float*)read_buf + (i + jump_npts) * (ndims + 1)) + 1;
         float data;
@@ -202,106 +168,6 @@ void generate_random_data_based_on_origin(std::string base_data_path, std::strin
         }
 
     }
-
-    float avg_distance_to_base = 0;
-    float min_distance = 10000;
-    float avg_distance = 0;
-    float max_distance = 0;
-
-
-    float min_distance_to_query_per_dim = 10000;
-    float avg_distance_to_base_per_dim = 0;
-    float avg_distance_to_query_per_dim = 0;
-    float max_distance_to_query_per_dim = 0;
-
-    count_pair = 0;
-
-    float* base = ((float*)read_buf + (0 + jump_npts) * (ndims + 1)) + 1;
-
-    for (int i = 0; i < num_copy; i++) {
-        float* query_i = write_buf + i * ndims;
-
-        float distance_to_base = 0;
-        float distance_to_base_per_dim = 0;
-        for (int dim = 0; dim < ndims; dim++) {
-            distance_to_base += (query_i[dim] - base[dim]) * (query_i[dim] - base[dim]);
-            distance_to_base_per_dim +=  std::fabs(query_i[dim] - base[dim]);
-        }
-        avg_distance_to_base += distance_to_base;
-        avg_distance_to_base_per_dim += (distance_to_base_per_dim / (1.0 * ndims));
-
-        for (int j = 0; j < num_copy; j++) {
-            if (i == j)
-                continue;
-            count_pair++;
-
-            float* query_j = write_buf + j * ndims;
-
-            float distance = 0;
-            for (int dim = 0; dim < ndims; dim++) {
-                distance += (query_i[dim] - query_j[dim]) * (query_i[dim] - query_j[dim]);
-            }
-
-            if (distance > max_distance)
-                max_distance = distance;
-            if (distance < min_distance)
-                min_distance = distance;
-            avg_distance += distance;
-        }
-
-        for (int j = 0; j < num_copy; j++) {
-            if (i == j)
-                continue;
-            count_pair++;
-
-            float* query_j = write_buf + j * ndims;
-
-            float distance = 0;
-            for (int dim = 0; dim < ndims; dim++) {
-                auto tmp_distance =  std::fabs(query_i[dim] - query_j[dim]);
-                distance += tmp_distance;
-
-                if (tmp_distance > max_distance_to_query_per_dim)
-                    max_distance_to_query_per_dim = tmp_distance;
-                if (tmp_distance < min_distance_to_query_per_dim) {
-
-                    min_distance_to_query_per_dim = tmp_distance;
-                    if (tmp_distance == 0 or tmp_distance < 0.000001)
-                        std::cout << query_i[dim] << " " << query_j[dim] << std::endl;
-                }
-            }
-            avg_distance_to_query_per_dim += (distance / (1.0 * ndims));
-        }
-    }
-    avg_distance_to_base_per_dim /= (1.0 * num_copy);
-    avg_distance /= (1.0 * count_pair);
-    avg_distance_to_query_per_dim /= (1.0 * count_pair);
-    avg_distance_to_base /= (1.0 * num_copy);
-
-
-    std::cout << avg_dim * 2.5 << " " << avg_dim  <<std::endl;
-    std::cout << avg_distance_per_dim << std::endl;
-    std::cout << avg_distance_to_base_per_dim << std::endl;
-    std::cout << min_distance_to_query_per_dim << std::endl;
-    std::cout << avg_distance_to_query_per_dim << std::endl;
-    std::cout << max_distance_to_query_per_dim << std::endl;
-    std::cout << std::endl;
-
-
-    std::cout << base_avg_distance << std::endl;
-    std::cout << avg_distance_to_base << std::endl;
-    std::cout << min_distance << std::endl;
-    std::cout << avg_distance << std::endl;
-    std::cout << max_distance << std::endl;
-
-    delete[] write_buf;
-    delete[] read_buf;
-
-    writer.close();
-    reader.close();
-    exit(0);
-
-
     writer.write((char *)write_buf, npts_generated * ndims * sizeof(float));
 
     delete[] write_buf;
