@@ -409,7 +409,7 @@ int same_node_test(diskann::Metric &metric, const std::string &index_path,
 
 
 
-    exit(0);
+//    exit(0);
 
     double best_recall = 0.0;
     for (uint32_t test_id = 0; test_id < Lvec.size(); test_id++) {
@@ -873,7 +873,7 @@ template <typename T, typename LabelT = uint32_t>
         delete[] test_query;
     }
 
-    std::string root = "/root/xiaoyao_zhong/";
+    std::string root = "/root/";
     writeToFile(max_shot_top_which_by_distance, root + dataset + "_max_shot_top_which_by_distance.txt");
     writeToFile(overlap_rate_by_distance, root + dataset + "_overlap_rate_by_distance.txt");
 }
@@ -974,7 +974,7 @@ int main(int argc, char **argv) {
                      << std::endl;
         return -1;
     }
-    std::string root_dir = "/root/xiaoyao_zhong/";
+    std::string root_dir = "/root/";
     std::string data_prefix = root_dir + "dataset/data/" + dataset;
     index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset +
             "_learn_R" + std::to_string(build_R) + "_L" + std::to_string(build_L) + "_A" + build_A;
