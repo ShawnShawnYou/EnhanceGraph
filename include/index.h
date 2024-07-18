@@ -66,6 +66,11 @@ template <typename T, typename TagT = uint32_t, typename LabelT = uint32_t> clas
         _dual_graph_store->add_neighbour(out_id, in_id);
     }
 
+    DISKANN_DLLEXPORT void preprocess_query(float* query_vec, const size_t query_dim,
+                                            float* scratch_query_vector) override {
+        _data_store->get_dist_fn()->preprocess_query((T* )query_vec, query_dim, (T* )scratch_query_vector);
+    }
+
     DISKANN_DLLEXPORT float get_distance(location_t loc1, location_t loc2) {
         return _data_store->get_distance(loc1, loc2);
     }

@@ -44,7 +44,7 @@ std::vector<int> intersection(const std::unordered_set<int>& set1, const std::un
 
 
 void writeToFile(const std::vector<std::pair<float, float>>& max_shot_top_which_by_distance, const std::string& filename) {
-    std::ofstream file(filename);
+    std::ofstream file(filename, std::ios_base::app);
 
     if (file.is_open()) {
         for (const auto& pair : max_shot_top_which_by_distance) {
@@ -607,7 +607,7 @@ template <typename T, typename LabelT = uint32_t>
             .build();
     auto index_factory = diskann::IndexFactory(config);
     auto index = index_factory.create_instance();
-    index->load(index_path.c_str(), num_threads, *(std::max_element(Lvec.begin(), Lvec.end())));
+    index->load(index_path.c_str(), num_threads, 500);
     index->use_cached_top1 = use_cached_top1;
 
     // start query
@@ -624,8 +624,6 @@ template <typename T, typename LabelT = uint32_t>
     std::unordered_map<uint32_t, std::vector<uint32_t>> route_map;                  // key: query id    value: route
 
 
-    // 根据50个topk的结果来生成query，每个topk生成10个
-    // 500个结果看看能收敛到哪里
     size_t read_blk_size = 64 * 1024 * 1024;
     cached_ifstream reader(base_file, read_blk_size);
     int npts_i32;
@@ -633,23 +631,16 @@ template <typename T, typename LabelT = uint32_t>
     int test_base_size = (uint32_t)npts_i32;
     int top_k_start = 0;
 
-    test_base_size = 20000;
+    test_base_size = 30000;
     int generated_num = 1;
     int sampled_base_num = 50000;
-//    std::vector<float> rate_list = {0.1, 0.15, 0.2, 0.25, 0.3};
-    std::vector<float> rate_list = {1};
+    std::vector<float> rate_list;
+    for (int i = 0; i <= 20; i++) {
+        rate_list.push_back(0.05 * i);
+    }
+
+
     int L = Lvec[0];
-
-
-    std::vector<float> rate_max_lo_result(rate_list.size());
-    std::vector<float> rate_same_lo_result(rate_list.size());
-    std::vector<float> rate_dif_lo_result(rate_list.size());
-
-    std::vector<std::pair<float, float>> max_shot_top_which_by_distance;
-    std::vector<std::pair<float, float>> overlap_rate_by_distance;
-    max_shot_top_which_by_distance.reserve(test_base_size * generated_num);
-    overlap_rate_by_distance.reserve(test_base_size * generated_num);
-
 
     float avg_dim = 0;
     for (int i = 0; i < sampled_base_num; i++) {
@@ -658,19 +649,42 @@ template <typename T, typename LabelT = uint32_t>
 
         float tmp = 0;
         for (int dim = 0; dim < query_dim; dim++) {
-            tmp += *(query + dim);
+            tmp += std::fabs(*(query + dim));
         }
         avg_dim += (tmp / (float)query_dim);
+        delete[] base_data;
     }
     avg_dim /= sampled_base_num;
 
+    std::string root = "/root/xiaoyao_zhong/";
+    auto file_max_shot = root + dataset + "_max_shot_top_which_by_distance.txt";
+    auto file_overlap = root + dataset + "_overlap_rate_by_distance.txt";
+    {
+        std::ofstream file1(file_max_shot);
+        file1 << "";
+        file1.close();
+
+        std::ofstream file2(file_overlap);
+        file2 << "";
+        file2.close();
+    }
+
+    std::vector<float> rate_max_lo_result(rate_list.size());
+    std::vector<float> rate_same_lo_result(rate_list.size());
+    std::vector<float> rate_dif_lo_result(rate_list.size());
 
     for (int tmp_i = 0; tmp_i < rate_list.size(); tmp_i++) {
+        float avg_overlap = 0;
+        float avg_rank = 0;
+        float avg_distance = 0;
+        float count_rank = 0;
+
+        std::vector<std::pair<float, float>> max_shot_top_which_by_distance;
+        std::vector<std::pair<float, float>> overlap_rate_by_distance;
+        max_shot_top_which_by_distance.reserve(test_base_size * generated_num);
+        overlap_rate_by_distance.reserve(test_base_size * generated_num);
+
         float rate = rate_list[tmp_i];
-        float noise = avg_dim * rate / 2;
-        std::random_device rd;
-        std::mt19937 gen(rd());
-        std::uniform_real_distribution<> dis(-1 * noise, noise);
 
         size_t test_query_num = test_base_size * generated_num;
 
@@ -692,7 +706,7 @@ template <typename T, typename LabelT = uint32_t>
                 int test_query_id = i * generated_num + k;
                 float* test_query_start = test_query + test_query_id * query_aligned_dim;
                 for (int d = 0; d < query_aligned_dim; d++) {
-                    test_query_start[d] = base_data[d] + dis(gen);
+                    test_query_start[d] = base_data[d] + avg_dim * rate;
                 }
                 base_ids[test_query_id] = base_id;
             }
@@ -709,30 +723,26 @@ template <typename T, typename LabelT = uint32_t>
         for (int i = 0; i < test_base_size; i++)  {
             // base information
             int base_id = i;
-            float* base_data = new float[query_aligned_dim];
-            index->get_data(base_data, base_id);
-
-
-            auto dual_adj_list = index->get_neighbors_dual(base_id);
-            auto neighbors = index->get_neighbors(base_id);
-            std::vector<std::pair<uint32_t, float>> full_adj;
-            for (int k = 0; k < dual_adj_list.size(); k++) {
-                uint32_t topk_id = dual_adj_list[k];
-                float distance = index->get_distance(base_data, topk_id);
-                full_adj.emplace_back(topk_id, distance);
+            std::vector<uint32_t> full_neighbors_id(recall_at);
+            std::vector<float> full_neighbors_dist(recall_at);
+            {
+                float* base_data = new float[query_aligned_dim];
+                float* dist = new float[topk_num];
+                index->get_data(base_data, base_id);
+                std::vector<uint32_t> route;
+                index->search_ret_route(
+                        i,
+                        base_data,
+                        recall_at,
+                        500,
+                        full_neighbors_id.data(),
+                        route,
+                        full_neighbors_dist.data()
+                        );
+                delete[] dist;
+                delete[] base_data;
             }
-            for (auto neighbor_id : neighbors) {
-                float distance = index->get_distance(base_data, neighbor_id);
-                full_adj.emplace_back((uint32_t)neighbor_id, distance);
-            }
-            std::sort(full_adj.begin(), full_adj.end(), [](auto a, auto b) {
-                return a.second < b.second;
-            });
-
-            std::unordered_set<int> base_neighbors_set;
-            for (int k = 0; k < recall_at; k++) {
-                base_neighbors_set.insert(full_adj[k].first);
-            }
+            std::unordered_set<int> full_neighbors_set(full_neighbors_id.begin(), full_neighbors_id.end());
 
 
             std::unordered_map<int, int> local_optimum_kind_count;
@@ -760,11 +770,13 @@ template <typename T, typename LabelT = uint32_t>
                     query_neighbors_set.insert(test_query_result_ids[k]);
                 }
 
-                std::vector<int> inter = intersection(query_neighbors_set, base_neighbors_set);
+                std::vector<int> inter = intersection(query_neighbors_set, full_neighbors_set);
 
                 #pragma critical
                 {
                     overlap_rate_by_distance.push_back({((float)inter.size() / (float)recall_at), distance});
+                    avg_overlap += ((float)inter.size() / (float)recall_at);
+                    avg_distance += distance;
                 }
 
 
@@ -775,11 +787,11 @@ template <typename T, typename LabelT = uint32_t>
 
                     // full neighbor of base
                     int which_top_k = 0;
-                    int max_k = std::min((int)full_adj.size(), 20);
-                    max_k = (int)full_adj.size();
+                    int max_k = std::min((int)full_neighbors_id.size(), 20);
+                    max_k = (int)full_neighbors_id.size();
 
                     for (int k = 0; max_k; k++) {
-                        if (full_adj[k].second > index->get_distance(base_id, local_optimum)) {
+                        if (full_neighbors_dist[k] > index->get_distance(base_id, local_optimum)) {
                             which_top_k = k;
                             break;
                         }
@@ -787,6 +799,8 @@ template <typename T, typename LabelT = uint32_t>
                     #pragma critical
                     {
                         max_shot_top_which_by_distance.push_back({which_top_k, distance});
+                        avg_rank += which_top_k;
+                        count_rank++;
                     }
 
                 }
@@ -795,67 +809,35 @@ template <typename T, typename LabelT = uint32_t>
             }
 
 
-            int same_local_count = 0;
-            int differ_local_count = 0;
-            int max_lo = 0, max_count = 0;
-            for (auto p : local_optimum_kind_count) {
-                if (p.second > max_count){
-                    max_count = p.second;
-                    max_lo = p.first;
-                }
-                if (p.second > 1) {
-                    same_local_count += p.second;
-                }
-                if (p.second == 1) {
-                    differ_local_count += 1;
-                }
-            }
-
-            if (count_not_base == 0) {
-                continue;
-            } else {
-                count_not_base_base++;
-            }
-
-
-            #pragma critical
-            {
-                rate_max_lo_result[tmp_i] += ((float)max_count / (float)count_not_base);
-                rate_same_lo_result[tmp_i] += ((float)same_local_count / (float)count_not_base);
-                rate_dif_lo_result[tmp_i] += ((float)differ_local_count / (float)count_not_base);
-            }
-
-
-            bool calculate_gt = false;
-            if (calculate_gt){
-//                std::vector<uint32_t> location_to_tag;
-//                std::string base_file = "/app/DiskANN/build/data/gist_random/gist_random_learn.fbin";
-//                size_t base_size = 90000;
-//                size_t k = 10;
-//                std::vector<std::vector<std::pair<uint32_t, float>>> results;
-//                results = processUnfilteredParts<T>(base_file, test_query_num, base_size, query_aligned_dim, L, test_query, metric,  location_to_tag);
-//
-//
-//                float count_base_equal_gt = 0;
-//                float count_topk_equal_gt = 0;
-//                for (int i = 0; i < test_query_num; i++) {
-//                    diskann::location_t base_id = base_ids[i];
-//                    diskann::location_t topk_id = topk_ids[i];
-//                    diskann::location_t converage_id = results[i][0].first;
-//                    if (converage_id == base_id) {
-//                        count_base_equal_gt ++;
-//                    } else if (converage_id == topk_id) {
-//                        count_topk_equal_gt ++;
-//                    }
+//            int same_local_count = 0;
+//            int differ_local_count = 0;
+//            int max_lo = 0, max_count = 0;
+//            for (auto p : local_optimum_kind_count) {
+//                if (p.second > max_count){
+//                    max_count = p.second;
+//                    max_lo = p.first;
 //                }
+//                if (p.second > 1) {
+//                    same_local_count += p.second;
+//                }
+//                if (p.second == 1) {
+//                    differ_local_count += 1;
+//                }
+//            }
 //
-//                std::cout <<
-//                count_base_equal_gt / (double) test_query_num << " " <<
-//                count_topk_equal_gt / (double) test_query_num << std::endl;
+//            if (count_not_base == 0) {
+//                continue;
+//            } else {
+//                count_not_base_base++;
+//            }
 //
-//                delete[] base_ids;
-//                delete[] topk_ids;
-            }
+//
+//            #pragma critical
+//            {
+//                rate_max_lo_result[tmp_i] += ((float)max_count / (float)count_not_base);
+//                rate_same_lo_result[tmp_i] += ((float)same_local_count / (float)count_not_base);
+//                rate_dif_lo_result[tmp_i] += ((float)differ_local_count / (float)count_not_base);
+//            }
 
         }
         if (count_not_base_base != 0) {
@@ -864,18 +846,24 @@ template <typename T, typename LabelT = uint32_t>
             rate_dif_lo_result[tmp_i] /= count_not_base_base;
         }
 
-        std::cout
-        << rate_max_lo_result[tmp_i] << " "
-        << rate_same_lo_result[tmp_i] << " "
-        << rate_dif_lo_result[tmp_i] << " "
-        << std::endl;
+//        std::cout
+//        << rate_max_lo_result[tmp_i] << " "
+//        << rate_same_lo_result[tmp_i] << " "
+//        << rate_dif_lo_result[tmp_i] << " "
+//        << std::endl;
+
+        std::cout << rate << " "
+        << avg_distance / test_query_num << " "
+        << avg_rank / count_rank << " "
+        << avg_overlap / test_query_num << std::endl;
+
+        writeToFile(max_shot_top_which_by_distance, file_max_shot);
+        writeToFile(overlap_rate_by_distance, file_overlap);
 
         delete[] test_query;
-    }
+        delete[] base_ids;
 
-    std::string root = "/root/xiaoyao_zhong/";
-    writeToFile(max_shot_top_which_by_distance, root + dataset + "_max_shot_top_which_by_distance.txt");
-    writeToFile(overlap_rate_by_distance, root + dataset + "_overlap_rate_by_distance.txt");
+    }
 }
 
 
@@ -887,7 +875,7 @@ int main(int argc, char **argv) {
     sa.sa_handler = &handle_sigterm;
     sigaction(SIGTERM, &sa, NULL);
 
-    std::string data_type, index_path_prefix, query_file, gt_file, filter_label, result_path,
+    std::string data_type, query_file, gt_file, filter_label, result_path,
     label_type, query_filters_file;
     uint32_t num_threads, K, train_L, topk_num, build_L, build_R, train_R;
     std::vector<uint32_t> Lvec;
@@ -903,7 +891,8 @@ int main(int argc, char **argv) {
     K = 10;
     train_L = 50;
     build_L = 100;
-    build_R = 32;
+    build_R = 12;
+
     train_R = 5;
     is_train = false;
     is_eval = false;
@@ -976,13 +965,12 @@ int main(int argc, char **argv) {
     }
     std::string root_dir = "/root/xiaoyao_zhong/";
     std::string data_prefix = root_dir + "dataset/data/" + dataset;
-    index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset +
-            "_learn_R" + std::to_string(build_R) + "_L" + std::to_string(build_L) + "_A" + build_A;
+    std::string index_path_prefix = root_dir + "index/";
 
-    if (is_eval or is_validate) {
-        index_path_prefix = index_path_prefix + "_train_TL" + std::to_string(train_L) +
-                "_TR" + std::to_string(train_R) + "_" + delta_str;
-    }
+    std::string index_prefix = algo_name + "/" + algo_name +  "_" + dataset +
+            "_learn_R" + std::to_string(build_R) + "_L" + std::to_string(build_L) + "_A" + build_A;
+    std::string dg_prefix = "_train_TL" + std::to_string(train_L) + "_TR" + std::to_string(train_R) + "_" + delta_str;
+    std::string index_path = index_path_prefix + "index_P/" + index_prefix;
 
 
     query_file = data_prefix + "/" + dataset + "_gen_query.fbin";
@@ -997,18 +985,9 @@ int main(int argc, char **argv) {
         gt_file = data_prefix + "/" + dataset + "_gen_query_learn_gt100";
     }
 
-    num_threads = 56;
-    if (is_train)
-        num_threads = 112;
-    if (not is_train) {
-        for (int i = 20; i <= 100; i+=20){
-            Lvec.push_back(i);
-        }
-    } else {
-        Lvec.assign({train_L});
-    }
-
-    query_route_test<float>(dataset, metric, index_path_prefix, query_file, gt_file,
+    num_threads = 112;
+    Lvec.assign({train_L});
+    query_route_test<float>(dataset, metric, index_path, query_file, gt_file,
                           num_threads, K, Lvec, base_file,
                           is_train, is_validate or is_eval, topk_num, delta_str);
 }

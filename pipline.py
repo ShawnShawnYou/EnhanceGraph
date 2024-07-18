@@ -89,20 +89,26 @@ def save_fvec(h5py_file_path, base_path, query_path, base_size=100000, query_siz
     return
 
 
-def pipeline():
+def pipeline(algo_name="vamana", dataset="gist1m", R=32, L=50, A=1.2):
     h5py_file_path = "/app/DiskANN/build/data/test/test.h5"
     base_size = 100000
     query_size = 10000
-    dataset = "gist_random"
+
     work_dir = "/app/DiskANN/build/"
 
+    if algo_name == "hnsw":
+        app_path_prefix = "/root/algorithm/hnsw/cmake-build-debug-container_diskann/"
+    else:
+        app_path_prefix = "/app/DiskANN/cmake-build-debug-container_diskann/apps/"
 
-    data_path_prefix = "/app/DiskANN/build/data/" + dataset
-    app_path_prefix = "/app/DiskANN/cmake-build-debug-container_diskann/apps/"
+    data_path_prefix = "/root/dataset/data/" + dataset + "/" + dataset
+    index_path_prefix = "/root/index/" + algo_name  \
+                        + "/index_" + daindex_path_prefixtaset + "_learn" \
+                        + "_R" + str(R) + " +_L" + str(L) + "_A" + str(A)
 
-    index_path = data_path_prefix + "/index_" + dataset + "_learn_R32_L50_A1.2"
-
-    data_path_prefix = data_path_prefix + "/" + dataset
+    pg_path = index_path_prefix + ".pg"
+    dg_path = index_path_prefix + ".dg"
+    tg_path = index_path_prefix + "_train.dg"
 
     learn_fvecs = data_path_prefix + "_learn.fvecs"
     query_fvecs = data_path_prefix + "_query.fvecs"

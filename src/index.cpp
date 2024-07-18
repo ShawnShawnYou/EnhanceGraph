@@ -228,6 +228,7 @@ template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, Labe
     // Note: at this point, either _nd == _max_points or any frozen points have
     // been temporarily moved to _nd, so _nd + _num_frozen_pts is the valid
     // location limit.
+    std::cout << "saving data to " + data_file << std::endl;
     return _data_store->save(data_file, (location_t)(_nd + _num_frozen_pts));
 }
 
@@ -236,8 +237,10 @@ template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, Labe
 // 4 byte uint32_t)
 template <typename T, typename TagT, typename LabelT> size_t Index<T, TagT, LabelT>::save_graph(std::string graph_file)
 {
-    _dual_graph_store->store(graph_file + ".dg", _nd + _num_frozen_pts, _num_frozen_pts, _start);
-    return _graph_store->store(graph_file + ".pg", _nd + _num_frozen_pts, _num_frozen_pts, _start);
+//    _dual_graph_store->store(graph_file + ".dg", _nd + _num_frozen_pts, _num_frozen_pts, _start);
+    std::cout << "saving graph to " + graph_file << std::endl;
+    return _graph_store->store(graph_file, _nd + _num_frozen_pts, _num_frozen_pts, _start);
+
 }
 
 template <typename T, typename TagT, typename LabelT>
@@ -333,9 +336,8 @@ void Index<T, TagT, LabelT>::save(const char *filename, bool compact_before_save
         // the files are deleted before save. Ideally, we should check
         // the error code for delete_file, but will ignore now because
         // delete should succeed if save will succeed.
-        delete_file(graph_file + ".dg");
-        delete_file(graph_file + ".pg");
-        save_graph(graph_file);
+        delete_file(graph_file);
+        save_graph(graph_file + ".pg");
         delete_file(data_file);
         save_data(data_file);
         delete_file(tags_file);
@@ -520,7 +522,7 @@ void Index<T, TagT, LabelT>::load(const char *filename, uint32_t num_threads, ui
         std::string data_file = std::string(filename) + ".data";
         std::string tags_file = std::string(filename) + ".tags";
         std::string delete_set_file = std::string(filename) + ".del";
-        std::string graph_file = std::string(filename);
+        std::string graph_file = std::string(filename) + ".pg";
         data_file_num_pts = load_data(data_file);
         if (file_exists(delete_set_file))
         {
@@ -653,8 +655,8 @@ template <typename T, typename TagT, typename LabelT>
 size_t Index<T, TagT, LabelT>::load_graph(std::string filename, size_t expected_num_points)
 {
 #endif
-    auto res = _graph_store->load(filename + ".pg", expected_num_points);
-    auto res_dual = _dual_graph_store->load(filename + ".dg", expected_num_points);
+    auto res = _graph_store->load(filename, expected_num_points);
+//    auto res_dual = _dual_graph_store->load(filename + ".dg", expected_num_points);
 
     _start = std::get<1>(res);
     _num_frozen_pts = std::get<2>(res);
@@ -979,6 +981,9 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
         }
     }
 
+    use_cached_top1 = false;
+    use_knn_graph = false;
+    use_bfs = false;
     if (use_cached_top1) {
 
         for (int i = 0; i < 2; i++) {
@@ -1579,7 +1584,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
         }
         {
             LockGuard guard(_locks[node]);
-            _dual_graph_store->set_neighbours(node, original_list);
+//            _dual_graph_store->set_neighbours(node, original_list);
         }
 
         if (node_ctr % 100000 == 0)
@@ -1640,6 +1645,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
     {
         diskann::cout << "Starting final cleanup.." << std::flush;
     }
+    omp_set_num_threads(num_threads);
     #pragma omp parallel for schedule(dynamic, 2048)
     for (int64_t node_ctr = 0; node_ctr < (int64_t)(visit_order.size()); node_ctr++)
     {
@@ -1668,17 +1674,17 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
             _graph_store->set_neighbours((location_t)node, new_out_neighbors);
 
             // reduce graph size
-            auto full_neighbors = _dual_graph_store->get_neighbours((location_t)node);
-            auto proximity_neighbors = _graph_store->get_neighbours((location_t)node);
-            std::unordered_set<uint32_t> proximity_neighbor_set(proximity_neighbors.begin(), proximity_neighbors.end());
+//            auto full_neighbors = _dual_graph_store->get_neighbours((location_t)node);
+//            auto proximity_neighbors = _graph_store->get_neighbours((location_t)node);
+//            std::unordered_set<uint32_t> proximity_neighbor_set(proximity_neighbors.begin(), proximity_neighbors.end());
 
-            std::vector<uint32_t> dual_neighbors;
-            for (auto neighbor : full_neighbors) {
-                if (neighbor != node and proximity_neighbor_set.find(neighbor) == proximity_neighbor_set.end()) {
-                    dual_neighbors.emplace_back(neighbor);
-                    proximity_neighbor_set.insert(neighbor);
-                }
-            }
+//            std::vector<uint32_t> dual_neighbors;
+//            for (auto neighbor : full_neighbors) {
+//                if (neighbor != node and proximity_neighbor_set.find(neighbor) == proximity_neighbor_set.end()) {
+//                    dual_neighbors.emplace_back(neighbor);
+//                    proximity_neighbor_set.insert(neighbor);
+//                }
+//            }
 
 //            if (dual_neighbors.size() + _graph_store->get_neighbours((location_t)node).size() > _indexingRange or
 //            _graph_store->get_neighbours((location_t)node).size() > _indexingRange) {
@@ -1691,8 +1697,8 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
 //                exit(0);
 //            };
 
-            _dual_graph_store->clear_neighbours((location_t)node);
-            _dual_graph_store->set_neighbours((location_t)node, dual_neighbors);
+//            _dual_graph_store->clear_neighbours((location_t)node);
+//            _dual_graph_store->set_neighbours((location_t)node, dual_neighbors);
         }
 
     }
@@ -1877,17 +1883,17 @@ void Index<T, TagT, LabelT>::build_with_data_populated(const std::vector<TagT> &
     link(); // todo: key
 
     size_t max = 0, min = SIZE_MAX, total = 0, cnt = 0;
-    for (size_t i = 0; i < _nd; i++)
-    {
-        auto &pool = _dual_graph_store->get_neighbours((location_t)i);
-        max = std::max(max, pool.size());
-        min = std::min(min, pool.size());
-        total += pool.size();
-        if (pool.size() < 2)
-            cnt++;
-    }
-    diskann::cout << "Dual Graph built with degree: max:" << max << "  avg:" << (float)total / (float)(_nd + _num_frozen_pts)
-    << "  min:" << min << "  count(deg<2):" << cnt << std::endl;
+//    for (size_t i = 0; i < _nd; i++)
+//    {
+//        auto &pool = _dual_graph_store->get_neighbours((location_t)i);
+//        max = std::max(max, pool.size());
+//        min = std::min(min, pool.size());
+//        total += pool.size();
+//        if (pool.size() < 2)
+//            cnt++;
+//    }
+//    diskann::cout << "Dual Graph built with degree: max:" << max << "  avg:" << (float)total / (float)(_nd + _num_frozen_pts)
+//    << "  min:" << min << "  count(deg<2):" << cnt << std::endl;
 
     max = 0; min = SIZE_MAX; total = 0; cnt = 0;
     for (size_t i = 0; i < _nd; i++)

@@ -10,6 +10,8 @@
 #include "timer.h"
 #include "percentile_stats.h"
 #include "program_options_utils.hpp"
+#include "in_mem_graph_store.h"
+#include "dual_graph.h"
 #include <signal.h>
 #include <iostream>
 
@@ -33,7 +35,7 @@
 #include "index_factory.h"
 //#include "../apps/utils/compute_groundtruth.cpp"
 
-
+int train_mode = 0;
 
 void handle_sigterm(int sig)
 {
@@ -41,9 +43,20 @@ void handle_sigterm(int sig)
 }
 
 
+std::vector<uint32_t>
+sort_priority_queue(std::priority_queue<std::pair<float, uint32_t>> pq) {
+    std::vector<uint32_t> sorted;
+    while (!pq.empty()) {
+        sorted.push_back(pq.top().second);
+        pq.pop();
+    }
+    std::reverse(sorted.begin(), sorted.end());
+    return sorted;
+}
+
 
 template <typename T, typename LabelT = uint32_t>
-        int same_node_test(diskann::Metric &metric, const std::string &index_path,
+int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dual_graph,
                            const std::string &query_file, const std::string &truthset_file, const uint32_t num_threads,
                            const uint32_t recall_at, const std::vector<uint32_t> &Lvec,
                            const std::string &base_file,
@@ -51,7 +64,6 @@ template <typename T, typename LabelT = uint32_t>
                            int eval_mode = -1) {
 
     // dim and num
-    using TagT = uint32_t;
     T *query = nullptr;
     uint32_t *gt_ids = nullptr;
     float *gt_dists = nullptr;
@@ -71,24 +83,6 @@ template <typename T, typename LabelT = uint32_t>
 
     diskann::load_truthset(truthset_file, gt_ids, gt_dists, gt_num, gt_dim);
 
-    auto config = diskann::IndexConfigBuilder()
-            .with_metric(metric)
-            .with_dimension(query_dim)
-            .with_max_points(0)
-            .with_data_load_store_strategy(diskann::DataStoreStrategy::MEMORY)
-            .with_graph_load_store_strategy(diskann::GraphStoreStrategy::MEMORY)
-            .with_data_type(diskann_type_to_name<T>())
-            .with_label_type(diskann_type_to_name<LabelT>())
-            .with_tag_type(diskann_type_to_name<TagT>())
-            .build();
-    auto index_factory = diskann::IndexFactory(config);
-    auto index = index_factory.create_instance();
-    index->load(index_path.c_str(), num_threads, *(std::max_element(Lvec.begin(), Lvec.end())));
-    index->use_cached_top1 = use_cached_top1;
-    if (use_cached_top1) {
-        index->use_aknng_enhancement = (eval_mode == 1);
-        index->use_only_build_info = (eval_mode == 3);
-    }
 
     // start query
     std::vector<std::vector<uint32_t>> query_result_ids(Lvec.size());
@@ -102,6 +96,224 @@ template <typename T, typename LabelT = uint32_t>
     std::unordered_map<uint32_t, uint32_t> gt_map;                                  // key: query id    value: gt_nn_id
     std::unordered_map<uint32_t, uint32_t> our_map;                                 // key: query id    value: our_nn_id
     std::unordered_map<uint32_t, std::vector<uint32_t>> route_map;                  // key: query id    value: route
+
+
+    bool is_calculate_middle = true;
+    if (is_train and is_calculate_middle) {
+        std::cout << "====Start generated vectors====" << std::endl;
+
+        size_t read_blk_size = 64 * 1024 * 1024;
+        cached_ifstream reader(base_file, read_blk_size);
+        int npts_i32;
+        reader.read((char *)&npts_i32, sizeof(int));
+        int test_base_size = (uint32_t)npts_i32;
+        float delta = std::stof(delta_str);
+
+        bool calculate_gt = false;
+
+        size_t test_query_num = test_base_size * topk_num;
+
+
+        diskann::location_t* base_ids = new diskann::location_t[query_aligned_dim * test_query_num];
+        diskann::location_t* topk_ids = new diskann::location_t[query_aligned_dim * test_query_num];
+
+        // generate test data
+        float* test_query = new float[query_aligned_dim * test_query_num];
+
+        omp_set_num_threads(num_threads);
+#pragma omp parallel for schedule(dynamic, 100)
+        for (int i = 0; i < test_base_size; i++) {
+            auto dual_adj_list = dual_graph->get_neighbours(i);
+            auto neighbors = index->get_neighbors(i);
+
+            float* base_data = new float[query_aligned_dim];
+            index->get_data(base_data, i);
+
+            float* norm_base = new float[query_aligned_dim];
+            index->preprocess_query(base_data, query_dim, norm_base);
+
+            {
+                std::vector<std::pair<uint32_t, float>> full_adj;
+                for (int k = 0; k < dual_adj_list.size(); k++) {
+                    uint32_t topk_id = dual_adj_list[k];
+                    float distance = index->get_distance(norm_base, topk_id);
+                    full_adj.emplace_back(topk_id, distance);
+                }
+                for (auto neighbor_id : neighbors) {
+                    float distance = index->get_distance(norm_base, neighbor_id);
+                    full_adj.emplace_back((uint32_t)neighbor_id, distance);
+                }
+
+                std::sort(full_adj.begin(), full_adj.end(), [](auto a, auto b) {
+                    return a.second < b.second;
+                });
+
+//                assert(topk_num - 1  < full_adj.size());
+
+                for (int k = 0; k < topk_num and k < full_adj.size(); k++) {
+                    diskann::location_t topk_id = full_adj[k].first;
+                    float* topk_data = new float[query_aligned_dim];
+                    index->get_data(topk_data, topk_id);
+
+                    float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
+                    base_ids[i * topk_num + k] = i;
+                    topk_ids[i * topk_num + k] = topk_id;
+
+                    for (int d = 0; d < query_aligned_dim; d++) {
+                        test_query_start[d] = delta * base_data[d] + (1 - delta) * topk_data[d];
+                    }
+
+                    delete[] topk_data;
+                }
+            }
+//            else {
+//                uint32_t* ids = new uint32_t[topk_num];
+//                float* dist = new float[topk_num];
+//                std::vector<uint32_t> route;
+//                index->search_ret_route(
+//                        i,
+//                        base_data,
+//                        topk_num,
+//                        100,
+//                        ids,
+//                        route,
+//                        dist
+//                        );
+//                for (int k = 0; k < topk_num; k++) {
+//                    float* topk_data = new float[query_aligned_dim];
+//                    index->get_data(topk_data, ids[k]);
+//
+//                    float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
+//                    base_ids[i * topk_num + k] = i;
+//                    topk_ids[i * topk_num + k] = ids[k];
+//
+//                    for (int d = 0; d < query_aligned_dim; d++) {
+//                        test_query_start[d] = delta * base_data[d] + (1 - delta) * topk_data[d];
+//                    }
+//
+//                    delete[] topk_data;
+//                }
+//
+//                delete[] ids;
+//                delete[] dist;
+//            }
+
+            delete[] base_data;
+            delete[] norm_base;
+        }
+
+
+        // query
+        int shot_base = 0;
+        int shot_topk = 0;
+        int shot_other = 0;
+
+        int rank_shot_base = 0;
+        int rank_shot_topk = 0;
+        int rank_shot_other = 0;
+
+        float distance2base_shot_base = 0;
+        float distance2base_shot_topk = 0;
+        float distance2base_shot_other = 0;
+
+        float avg_distance2base = 0;
+        float count_add_edges = 0;
+        std::set<std::pair<diskann::location_t, diskann::location_t>> add_edges;
+
+
+        std::cout << "====Start generated feedback====" << std::endl;
+        omp_set_num_threads(num_threads);
+    #pragma omp parallel for schedule(dynamic, 1)
+        for (int i = 0; i < test_base_size; i++)  {
+            int base_id = i;
+
+            for (int k = 0; k < topk_num; k++) {
+                diskann::location_t topk_id = topk_ids[i * topk_num + k];
+
+                float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
+
+                std::vector<uint32_t> test_query_result_ids(recall_at);
+                std::vector<float> test_query_result_dists(recall_at);
+                std::vector<uint32_t> route;
+                int L = Lvec[0];
+
+                index->search_ret_route(
+                        i,
+                        test_query_start,
+                        recall_at,
+                        L,
+                        test_query_result_ids.data(),
+                        route,
+                        test_query_result_dists.data()
+                        );
+
+                int local_optimum = test_query_result_ids[0];
+
+
+                if (local_optimum != base_id) {
+                        #pragma omp critical
+                    {
+                        add_edges.insert({local_optimum, base_id});
+                    }
+                }
+
+                {
+                    avg_distance2base += index->get_distance(test_query_start, base_id);
+                    if (local_optimum == base_id) {
+                        shot_base++;
+                        rank_shot_base += k;
+                        distance2base_shot_base += index->get_distance(test_query_start, base_id);
+                    } else if (local_optimum == topk_id) {
+                        shot_topk++;
+                        rank_shot_topk += k;
+                        distance2base_shot_topk += index->get_distance(test_query_start, base_id);
+                    } else {
+                        shot_other++;
+                        rank_shot_other += k;
+                        distance2base_shot_other += index->get_distance(test_query_start, base_id);
+
+                    }
+                }
+            }
+        }
+
+        for (auto p : add_edges) {
+            dual_graph->add_neighbour(p.first, p.second);
+            count_add_edges++;
+        }
+
+
+        {
+            std::cout << delta << std::endl;
+            std::cout << avg_distance2base / (double) test_query_num << " " << std::endl;
+            std::cout << count_add_edges / (double) test_base_size << " " << std::endl;
+
+            std::cout
+                    << shot_base / (double) test_query_num << " "
+                    << shot_topk / (double) test_query_num << " "
+                    << shot_other / (double) test_query_num
+                    << std::endl;
+
+            std::cout
+                    << rank_shot_base / (double) test_query_num << " "
+                    << rank_shot_topk / (double) test_query_num << " "
+                    << rank_shot_other / (double) test_query_num
+                    << std::endl;
+
+            std::cout
+                    << distance2base_shot_base / (double) test_query_num << " "
+                    << distance2base_shot_topk / (double) test_query_num << " "
+                    << distance2base_shot_other / (double) test_query_num
+                    << std::endl;
+
+            std::cout << std::endl;
+        }
+
+        delete[] test_query;
+
+    }
+
+
 
     if (print_all_recalls) {
         std::cout << "Using " << num_threads << " threads to search" << std::endl;
@@ -119,244 +331,6 @@ template <typename T, typename LabelT = uint32_t>
         std::cout << std::endl;
         std::cout << std::string(table_width, '=') << std::endl;
     }
-
-    bool is_calculate_middle = true;
-    if (is_train and is_calculate_middle) {
-        // 根据50个topk的结果来生成query，每个topk生成10个
-        // 500个结果看看能收敛到哪里
-        size_t read_blk_size = 64 * 1024 * 1024;
-        cached_ifstream reader(base_file, read_blk_size);
-        int npts_i32;
-        reader.read((char *)&npts_i32, sizeof(int));
-        int test_base_size = (uint32_t)npts_i32;
-        int top_k_start = 0;
-        std::vector<float> delta_list = {0.51, 0.6, 0.7, 0.8, 0.9, 1};
-        //    delta_list.assign({0, 1});
-        //    delta_list.assign({0.1, 0.2, 0.3, 0.4, 0.49});
-        float delta = std::stof(delta_str);
-        delta_list.assign({delta});
-
-        bool calculate_gt = false;
-
-        size_t test_query_num = test_base_size * topk_num;
-
-        for (auto delta : delta_list) {
-            diskann::location_t* base_ids = new diskann::location_t[query_aligned_dim * test_query_num];
-            diskann::location_t* topk_ids = new diskann::location_t[query_aligned_dim * test_query_num];
-
-            // generate test data
-            float* test_query = new float[query_aligned_dim * test_query_num];
-
-            for (int i = 0; i < test_base_size; i++) {
-                int base_id = i;
-                auto dual_adj_list = index->get_neighbors_dual(base_id);
-                auto neighbors = index->get_neighbors(base_id);
-
-                float* base_data = new float[query_aligned_dim];
-                index->get_data(base_data, base_id);
-
-                std::vector<std::pair<uint32_t, float>> full_adj;
-                for (int k = 0; k < dual_adj_list.size(); k++) {
-                    uint32_t topk_id = dual_adj_list[k];
-                    float distance = index->get_distance(base_data, topk_id);
-                    full_adj.emplace_back(topk_id, distance);
-                }
-                for (auto neighbor_id : neighbors) {
-                    float distance = index->get_distance(base_data, neighbor_id);
-                    full_adj.emplace_back((uint32_t)neighbor_id, distance);
-                }
-
-                std::sort(full_adj.begin(), full_adj.end(), [](auto a, auto b) {
-                    return a.second < b.second;
-                });
-
-
-                assert(topk_num - 1 + top_k_start < full_adj.size());
-
-                for (int k = 0; k < topk_num; k++) {
-                    diskann::location_t topk_id = full_adj[k + top_k_start].first;
-                    float* topk_data = new float[query_aligned_dim];
-                    index->get_data(topk_data, topk_id);
-
-                    float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
-                    base_ids[i * topk_num + k] = base_id;
-                    topk_ids[i * topk_num + k] = topk_id;
-
-                    for (int d = 0; d < query_aligned_dim; d++) {
-                        test_query_start[d] = delta * base_data[d] + (1 - delta) * topk_data[d];
-                    }
-
-                    delete[] topk_data;
-                }
-
-                delete[] base_data;
-            }
-
-
-            // calculate global optimal
-            if (calculate_gt) {
-                std::vector<uint32_t> location_to_tag;
-                std::string base_file = "/app/DiskANN/build/data/gist_random/gist_random_learn.fbin";
-                size_t base_size = 90000;
-                size_t k = 10;
-                std::vector<std::vector<std::pair<uint32_t, float>>> results;
-//                results = processUnfilteredParts<T>(base_file, test_query_num, base_size, query_aligned_dim, k, test_query, metric,  location_to_tag);
-
-
-                float count_base_equal_gt = 0;
-                float count_topk_equal_gt = 0;
-                for (int i = 0; i < test_query_num; i++) {
-                    diskann::location_t base_id = base_ids[i];
-                    diskann::location_t topk_id = topk_ids[i];
-                    diskann::location_t converage_id = results[i][0].first;
-                    if (converage_id == base_id) {
-                        count_base_equal_gt ++;
-                    } else if (converage_id == topk_id) {
-                        count_topk_equal_gt ++;
-                    }
-                }
-
-                std::cout <<
-                count_base_equal_gt / (double) test_query_num << " " <<
-                count_topk_equal_gt / (double) test_query_num << std::endl;
-
-                delete[] base_ids;
-                delete[] topk_ids;
-            }
-
-            // query
-            int shot_base = 0;
-            int shot_topk = 0;
-            int shot_other = 0;
-
-            int rank_shot_base = 0;
-            int rank_shot_topk = 0;
-            int rank_shot_other = 0;
-
-            float distance2base_shot_base = 0;
-            float distance2base_shot_topk = 0;
-            float distance2base_shot_other = 0;
-
-            float avg_distance2base = 0;
-
-            float count_add_edges = 0;
-            std::set<std::pair<diskann::location_t, diskann::location_t>> add_edges;
-
-            omp_set_num_threads(num_threads);
-    #pragma omp parallel for schedule(dynamic, 1)
-            for (int i = 0; i < test_base_size; i++)  {
-                int base_id = i;
-                auto dual_adj_list = index->get_neighbors_dual(base_id);
-                auto neighbors = index->get_neighbors(base_id);
-
-                float* base_data = new float[query_aligned_dim];
-                index->get_data(base_data, base_id);
-
-                std::vector<std::pair<uint32_t, float>> full_adj;
-                for (int k = 0; k < dual_adj_list.size(); k++) {
-                    uint32_t topk_id = dual_adj_list[k];
-                    float distance = index->get_distance(base_data, topk_id);
-                    full_adj.emplace_back(topk_id, distance);
-                }
-                for (auto neighbor_id : neighbors) {
-                    float distance = index->get_distance(base_data, neighbor_id);
-                    full_adj.emplace_back((uint32_t)neighbor_id, distance);
-                }
-
-                std::sort(full_adj.begin(), full_adj.end(), [](auto a, auto b) {
-                    return a.second < b.second;
-                });
-
-
-                assert(topk_num - 1 + top_k_start < full_adj.size());
-
-                for (int k = 0; k < topk_num; k++) {
-                    diskann::location_t topk_id = full_adj[k + top_k_start].first;
-
-                    float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
-
-                    std::vector<uint32_t> test_query_result_ids(recall_at);
-                    std::vector<float> test_query_result_dists(recall_at);
-                    std::vector<uint32_t> route;
-                    int L = Lvec[0];
-
-                    index->search_ret_route(
-                            i,
-                            test_query_start,
-                            recall_at,
-                            L,
-                            test_query_result_ids.data(),
-                            route,
-                            test_query_result_dists.data()
-                            );
-
-                    int local_optimum = test_query_result_ids[0];
-
-
-                    if (local_optimum != base_id) {
-                        #pragma omp critical
-                        {
-                            add_edges.insert({local_optimum, base_id});
-                        }
-                    }
-
-                    avg_distance2base += index->get_distance(test_query_start, base_id);
-                    if (local_optimum == base_id) {
-                        shot_base++;
-                        rank_shot_base += k;
-                        distance2base_shot_base += index->get_distance(test_query_start, base_id);
-                    }
-                    else if (local_optimum == topk_id) {
-                        shot_topk++;
-                        rank_shot_topk += k;
-                        distance2base_shot_topk += index->get_distance(test_query_start, base_id);
-                    }
-                    else {
-                        shot_other++;
-                        rank_shot_other += k;
-                        distance2base_shot_other += index->get_distance(test_query_start, base_id);
-
-                    }
-                }
-            }
-
-            for (auto p : add_edges) {
-                index->add_neighbor_dual(p.first, p.second);
-                count_add_edges++;
-            }
-
-
-            std::cout << delta << std::endl;
-            std::cout << avg_distance2base / (double)test_query_num << " " << std::endl;
-            std::cout << count_add_edges / (double)test_base_size << " " << std::endl;
-
-            std::cout
-            << shot_base / (double)test_query_num << " "
-            << shot_topk / (double)test_query_num << " "
-            << shot_other / (double)test_query_num
-            << std::endl;
-
-            std::cout
-            << rank_shot_base / (double)test_query_num << " "
-            << rank_shot_topk / (double)test_query_num << " "
-            << rank_shot_other / (double)test_query_num
-            << std::endl;
-
-            std::cout
-            << distance2base_shot_base / (double)test_query_num << " "
-            << distance2base_shot_topk / (double)test_query_num << " "
-            << distance2base_shot_other / (double)test_query_num
-            << std::endl;
-
-            std::cout << std::endl;
-
-            delete[] test_query;
-        }
-    }
-
-
-
-
 
 
     double best_recall = 0.0;
@@ -394,6 +368,55 @@ template <typename T, typename LabelT = uint32_t>
                     query_result_dists[test_id].data() + i * recall_at
                     ).second;
 
+            if (use_cached_top1 or is_train) {
+                float* norm_query = new float[query_aligned_dim];
+                index->preprocess_query(query + i * query_aligned_dim, query_dim, norm_query);
+
+
+                std::priority_queue<std::pair<float, uint32_t>> result_queue;
+                std::unordered_set<uint32_t> result_set;
+                bool find_new;
+                for (int j = 0; j < recall_at; j++) {
+                    result_queue.push({(query_result_dists[test_id].data() + i * recall_at)[j],
+                                       (query_result_ids[test_id].data() + i * recall_at)[j]});
+                    result_set.insert((query_result_ids[test_id].data() + i * recall_at)[j]);
+                }
+                for (int j = 0; j < 2; j++) {
+                    uint32_t top1_id = (query_result_ids[test_id].data() + i * recall_at)[0];
+
+                    if (use_cached_top1) {
+                        const auto& neighbors = dual_graph->get_neighbours(top1_id);
+
+                        for (auto neighbor_id : neighbors) {
+                            float distance_cmp = index->get_distance(norm_query, 10000);
+                            float distance = index->get_distance(norm_query, neighbor_id);
+                            if (distance < result_queue.top().first and result_set.find(neighbor_id) == result_set.end()){
+                                result_set.insert(neighbor_id);
+                                result_queue.push({distance, neighbor_id});
+                                result_queue.pop();
+                            }
+                            if (distance < (query_result_dists[test_id].data() + i * recall_at)[0]) {
+                                find_new = true;
+                            }
+                        }
+
+                    }
+
+                    if (find_new) {
+                        continue;
+                    } else{
+                        break;
+                    }
+                }
+
+                delete[] norm_query;
+
+                auto sorted_result = sort_priority_queue(result_queue);
+
+                for (auto j = 0; j < recall_at; j++){
+                    query_result_ids[test_id][i * recall_at + j] = sorted_result[j];
+                }
+            }
 
             if (is_train) {
                 // 注意id没在query里，query只有向量，id应该是tag
@@ -402,11 +425,8 @@ template <typename T, typename LabelT = uint32_t>
 
                 diskann::location_t gt_nn_id = gt_id_vec_start[0];
                 diskann::location_t our_nn_id = query_result_ids[test_id][i * recall_at];
-                //            float gt_nn_dist = gt_dist_vec_start[0];
-                //            float our_nn_dist = query_result_dists[test_id][i * recall_at];
 
                 std::vector<diskann::location_t> gt_id_vec(gt_id_vec_start,gt_id_vec_start + (uint32_t)recall_at);
-                std::vector<float> gt_dist_vec(gt_dist_vec_start,gt_dist_vec_start + (uint32_t)recall_at);
 
                 if (test_id == 0 and our_nn_id != gt_nn_id) {
                     #pragma omp critical
@@ -423,14 +443,12 @@ template <typename T, typename LabelT = uint32_t>
             latency_stats[i] = (float)(diff.count() * 1000000);
         }
 
-        std::cout << index->valid_insert << " " << query_num << std::endl;
+//        std::cout << index->valid_insert << " " << query_num << std::endl;
 
         if (is_train && test_id == 0) {
             for (auto p : add_edge_pairs)
-                index->add_neighbor_dual(p.first, p.second);
+                dual_graph->add_neighbour(p.first, p.second);
             add_edge_pairs.clear();
-
-            index->save((index_path + "_train_TL" + std::to_string(L) + "_TR" + std::to_string(topk_num) + "_" + delta_str).c_str(), false);
         }
 
         if (print_all_recalls) {
@@ -484,7 +502,13 @@ int main(int argc, char **argv) {
     sa.sa_handler = &handle_sigterm;
     sigaction(SIGTERM, &sa, NULL);
 
-    std::string data_type, index_path_prefix, query_file, gt_file, filter_label, result_path,
+#ifdef NDEBUG
+    std::cout << "Release Mode" << std::endl;
+#else
+    std::cout << "Debug Mode" << std::endl;
+#endif
+
+    std::string data_type, query_file, gt_file, filter_label, result_path,
     label_type, query_filters_file;
     uint32_t num_threads, K, train_L, topk_num, build_L, build_R, train_R;
     int eval_mode = -1;
@@ -510,7 +534,7 @@ int main(int argc, char **argv) {
     if (argc >= 2)
         dataset = std::string(argv[1]);
     if (argc >= 3) {
-        is_train = std::stoi(argv[2]) != 0;
+        train_mode = std::stoi(argv[2]);
     }
     if (argc >= 4) {
         eval_mode = std::stoi(argv[3]);
@@ -532,7 +556,6 @@ int main(int argc, char **argv) {
     }
     if (argc >= 10) {
         result_path = std::string(argv[9]);
-        freopen(result_path.c_str(), "w", stdout);
     }
     if (argc >= 11) {
         build_L = std::stoi(argv[10]);
@@ -551,6 +574,10 @@ int main(int argc, char **argv) {
     }
     topk_num = train_R;
     is_eval = eval_mode != 0;
+    is_train = train_mode != 0;
+    if (not result_path.empty()) {
+        freopen(result_path.c_str(), "w", stdout);
+    }
 
 
     diskann::Metric metric;
@@ -575,12 +602,34 @@ int main(int argc, char **argv) {
     }
     std::string root_dir = "/root/xiaoyao_zhong/";
     std::string data_prefix = root_dir + "dataset/data/" + dataset;
-    index_path_prefix = root_dir + "index/" + algo_name + "/" + algo_name +  "_" + dataset +
+    std::string index_path_prefix = root_dir + "index/";
+
+
+    std::string index_prefix = algo_name + "/" + algo_name +  "_" + dataset +
             "_learn_R" + std::to_string(build_R) + "_L" + std::to_string(build_L) + "_A" + build_A;
+    std::string dg_prefix = "_train_TL" + std::to_string(train_L) + "_TR" + std::to_string(train_R) + "_" + delta_str;
+
+    std::string index_path = index_path_prefix + "index_P/" + index_prefix;
+    std::string dual_graph_path, dual_train_graph_path;
+    if (train_mode == 1 or train_mode == 3)
+        dual_graph_path = index_path_prefix + "index_C/" + index_prefix + dg_prefix + ".dg";
+    else
+        dual_graph_path = index_path_prefix + "index_empty/" + index_prefix + dg_prefix + ".dg";
+
+    if (train_mode == 1 or eval_mode == 1 or is_validate)
+        dual_train_graph_path = index_path_prefix + "index_SC/" + index_prefix + dg_prefix + ".dg";
+    else if (train_mode == 2  or eval_mode == 2)
+        dual_train_graph_path = index_path_prefix + "index_S/" + index_prefix + dg_prefix + ".dg";
+    else if (train_mode == 3  or eval_mode == 3)
+        dual_train_graph_path = index_path_prefix + "index_C/" + index_prefix + dg_prefix + ".dg";
 
     if (is_eval or is_validate) {
-        index_path_prefix = index_path_prefix + "_train_TL" + std::to_string(train_L) +
-                "_TR" + std::to_string(train_R) + "_" + delta_str;
+        dual_graph_path = dual_train_graph_path;
+        std::cout << "Loading Dual Graph from: " + dual_graph_path << std::endl;
+        if (not std::filesystem::exists(dual_graph_path)) {
+            std::cout << "Error: No Trained index" << std::endl;
+            return 0;
+        }
     }
 
 
@@ -596,24 +645,115 @@ int main(int argc, char **argv) {
         gt_file = data_prefix + "/" + dataset + "_gen_query_learn_gt100";
     }
 
-    num_threads = 56;
+    num_threads = 112;
     if (is_train)
         num_threads = 112;
     if (not is_train) {
-        for (int i = 20; i <= 200; i+=10){
+        for (int i = 20; i <= 100; i+=10){
             Lvec.push_back(i);
         }
     } else {
         Lvec.assign({train_L});
     }
 
+
+    float *query, *base = nullptr;
+    size_t base_num, base_dim, base_aligned_dim;
+    diskann::load_aligned_bin<float>(base_file, base, base_num, base_dim, base_aligned_dim);
+
+    auto config = diskann::IndexConfigBuilder()
+            .with_metric(metric)
+            .with_dimension(base_dim)
+            .with_max_points(0)
+            .with_data_load_store_strategy(diskann::DataStoreStrategy::MEMORY)
+            .with_graph_load_store_strategy(diskann::GraphStoreStrategy::MEMORY)
+            .with_data_type(diskann_type_to_name<float>())
+            .with_label_type(diskann_type_to_name<uint32_t>())
+            .with_tag_type(diskann_type_to_name<uint32_t>())
+            .build();
+    auto index_factory = diskann::IndexFactory(config);
+    auto index = index_factory.create_instance();
+    index->load(index_path.c_str(), num_threads, *(std::max_element(Lvec.begin(), Lvec.end())));
+
+
+    DualGraph* dual_graph = new DualGraph(base_num);
+    {
+        if (std::filesystem::exists(dual_graph_path)) {
+            std::cout << "====Start load dual graph====" << std::endl;
+            std::cout << "from path: " << dual_graph_path << std::endl;
+            dual_graph->load_graph(dual_graph_path, base_num);
+        } else if (train_mode == 3) {
+            std::cout << "====Start build dual graph====" << std::endl;
+            auto s = std::chrono::high_resolution_clock::now();
+            omp_set_num_threads(num_threads);
+#pragma omp parallel for schedule(dynamic, 100)
+            for (int i = 0; i < base_num; i++) {
+                if (i % 1000 == 0)
+                    std::cout << "processed on " << i << " " << std::endl;
+
+                float *dist = new float[build_R];
+                uint32_t *id = new uint32_t[build_R];
+                std::vector<uint32_t> route;
+
+                index->search_ret_route(
+                        i,
+                        base + i * base_aligned_dim,
+                        build_R,
+                        build_L,
+                        id,
+                        route,
+                        dist
+                        );
+
+                std::vector<diskann::location_t> neighbors = index->get_neighbors(i);
+                std::unordered_set<diskann::location_t> neighbors_set(neighbors.begin(), neighbors.end());
+
+                for (int j = 0; j < build_R; j++) {
+                    auto cand_id = id[j];
+                    if (neighbors_set.find(cand_id) == neighbors_set.end() and cand_id != i) {
+                        dual_graph->add_neighbour(i, cand_id);
+                    }
+                }
+
+                delete[] dist;
+                delete[] id;
+
+            }
+
+            std::cout << "Dual Graph Saving to " << dual_graph_path << std::endl;
+            dual_graph->save_graph(dual_graph_path, base_num, 0, 0);
+
+            auto e = std::chrono::high_resolution_clock::now();
+            std::chrono::duration<double> diff = e - s;
+            std::cout << "Dual Graph Indexing time: " << diff.count() << std::endl;
+        }
+
+        if (train_mode == 3) {
+            std::cout << "====Exiting====" << dual_graph_path << std::endl;
+            return 0;
+        }
+    }
+
+    if (is_train){
+        std::cout << "====Before train====" << std::endl;
+        std::cout << "dg path: " << dual_train_graph_path << std::endl;
+        std::cout << "dg edges: " << dual_graph->get_num_edges() << std::endl;
+    }
+
     auto s = std::chrono::high_resolution_clock::now();
 
-    same_node_test<float>(metric, index_path_prefix, query_file, gt_file,
+    same_node_test<float>(std::move(index), dual_graph, query_file, gt_file,
                           num_threads, K, Lvec, base_file,
                           is_train, is_validate or is_eval, topk_num, delta_str, eval_mode);
 
     auto e = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double> diff = e - s;
     std::cout << "Training or Searching time: " << diff.count() << std::endl;
+
+    if (is_train){
+        std::cout << "====Dual Graph Saving====" << std::endl;
+        std::cout << "dg path: " << dual_train_graph_path << std::endl;
+        dual_graph->save_graph(dual_train_graph_path, base_num, 0, 0);
+        std::cout << "dg edges: " << dual_graph->get_num_edges() << std::endl;
+    }
 }

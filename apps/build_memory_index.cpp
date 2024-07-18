@@ -109,7 +109,9 @@ int main(int argc, char **argv)
         return -1;
     }
 
-    freopen(result_path.c_str(), "w", stdout);
+    if (not result_path.empty()) {
+        freopen(result_path.c_str(), "w", stdout);
+    }
 
     diskann::Metric metric;
     if (dist_fn == std::string("mips"))

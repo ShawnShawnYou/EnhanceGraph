@@ -95,6 +95,9 @@ class AbstractIndex
     virtual float get_distance(location_t loc1, location_t loc2) = 0;
     virtual float get_distance(float* query, location_t loc2) = 0;
 
+    virtual void preprocess_query(float* query_vec, const size_t query_dim,
+                                  float* scratch_query_vector) = 0;
+
 
 
     AbstractIndex() = default;

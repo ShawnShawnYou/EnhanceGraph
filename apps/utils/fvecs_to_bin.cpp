@@ -139,14 +139,14 @@ void generate_random_data_based_on_origin(std::string base_data_path, std::strin
 
         float tmp = 0;
         for (int dim = 0; dim < ndims; dim++) {
-            tmp += *(query + dim);
+            tmp += std::fabs(*(query + dim));
         }
         avg_dim += (tmp / (float)ndims);
     }
     avg_dim /= sampled_base_num;
 
 
-    avg_dim /= 2.5;
+    avg_dim /= 2.0;
 
 
 
@@ -240,7 +240,7 @@ int main(int argc, char **argv)
     std::cout << "Dataset: #pts = " << npts << ", # dims = " << ndims << std::endl;
 
     if (is_generate != 0) {
-        generate_random_data_based_on_origin(argv[2], argv[3], generate_npts, 1, jump_npts);
+        generate_random_data_based_on_origin(argv[2], argv[3], generate_npts, 10, jump_npts);
         return 0;
     }
 
@@ -293,7 +293,7 @@ int main(int argc, char **argv)
 
 // float data/sift/sift_query.fvecs data/sift/sift_query.fbin 5000 0
 // float data/sift/sift_query.fvecs data/sift/sift_train.fbin 5000 5000
-// float data/sift/sift_base.fvecs data/sift/sift_learn.fbin 100000
+// float /root/xiaoyao_zhong/dataset/data/deep-image-96-angular/learn.fvecs  /root/xiaoyao_zhong/dataset/data/deep-image-96-angular/learn.fbin 10000000 0 0
 
 
 // todo gist_base to query
