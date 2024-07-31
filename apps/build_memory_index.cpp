@@ -218,6 +218,9 @@ int main(int argc, char **argv)
         if (algo_name == "NSG") {
             index->strategy = diskann::AbstractIndex::NSG;
         }
+        if (algo_name == "KNNG") {
+            index->strategy = diskann::AbstractIndex::KNNG;
+        }
 
 
         index->build(data_path, data_num, filter_params);

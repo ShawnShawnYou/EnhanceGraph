@@ -71,7 +71,7 @@ int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dua
 
 
     // print related
-    bool show_qps_per_thread = false;
+    bool show_qps_per_thread = true;
     bool print_all_recalls = true;
     uint32_t recalls_to_print = 0;
     uint32_t table_width = 0;
@@ -166,37 +166,6 @@ int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dua
                     delete[] topk_data;
                 }
             }
-//            else {
-//                uint32_t* ids = new uint32_t[topk_num];
-//                float* dist = new float[topk_num];
-//                std::vector<uint32_t> route;
-//                index->search_ret_route(
-//                        i,
-//                        base_data,
-//                        topk_num,
-//                        100,
-//                        ids,
-//                        route,
-//                        dist
-//                        );
-//                for (int k = 0; k < topk_num; k++) {
-//                    float* topk_data = new float[query_aligned_dim];
-//                    index->get_data(topk_data, ids[k]);
-//
-//                    float* test_query_start = test_query + (i * topk_num + k) * query_aligned_dim;
-//                    base_ids[i * topk_num + k] = i;
-//                    topk_ids[i * topk_num + k] = ids[k];
-//
-//                    for (int d = 0; d < query_aligned_dim; d++) {
-//                        test_query_start[d] = delta * base_data[d] + (1 - delta) * topk_data[d];
-//                    }
-//
-//                    delete[] topk_data;
-//                }
-//
-//                delete[] ids;
-//                delete[] dist;
-//            }
 
             delete[] base_data;
             delete[] norm_base;
@@ -222,9 +191,12 @@ int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dua
 
 
         std::cout << "====Start generated feedback====" << std::endl;
+        std::cout << "query size: " << test_base_size * topk_num << std::endl;
         omp_set_num_threads(num_threads);
-    #pragma omp parallel for schedule(dynamic, 1)
+    #pragma omp parallel for schedule(dynamic, 100)
         for (int i = 0; i < test_base_size; i++)  {
+            if (i % 1000 == 0)
+                std::cout << "processed on " << i << " " << std::endl;
             int base_id = i;
 
             for (int k = 0; k < topk_num; k++) {
@@ -254,24 +226,6 @@ int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dua
                         #pragma omp critical
                     {
                         add_edges.insert({local_optimum, base_id});
-                    }
-                }
-
-                {
-                    avg_distance2base += index->get_distance(test_query_start, base_id);
-                    if (local_optimum == base_id) {
-                        shot_base++;
-                        rank_shot_base += k;
-                        distance2base_shot_base += index->get_distance(test_query_start, base_id);
-                    } else if (local_optimum == topk_id) {
-                        shot_topk++;
-                        rank_shot_topk += k;
-                        distance2base_shot_topk += index->get_distance(test_query_start, base_id);
-                    } else {
-                        shot_other++;
-                        rank_shot_other += k;
-                        distance2base_shot_other += index->get_distance(test_query_start, base_id);
-
                     }
                 }
             }
@@ -352,8 +306,9 @@ int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dua
 
 
         auto s = std::chrono::high_resolution_clock::now();
+        int succ_total = 0, dis_cmp_total = 0;
         omp_set_num_threads(num_threads);
-#pragma omp parallel for schedule(dynamic, 1)
+#pragma omp parallel for schedule(dynamic, 100)
         for (int64_t i = 0; i < (int64_t)query_num; i++) {
             auto qs = std::chrono::high_resolution_clock::now();
 
@@ -376,31 +331,42 @@ int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dua
                 std::priority_queue<std::pair<float, uint32_t>> result_queue;
                 std::unordered_set<uint32_t> result_set;
                 bool find_new;
+                int succ = 0;
                 for (int j = 0; j < recall_at; j++) {
                     result_queue.push({(query_result_dists[test_id].data() + i * recall_at)[j],
                                        (query_result_ids[test_id].data() + i * recall_at)[j]});
                     result_set.insert((query_result_ids[test_id].data() + i * recall_at)[j]);
                 }
                 for (int j = 0; j < 2; j++) {
+                    int dis_cmp = 0;
                     uint32_t top1_id = (query_result_ids[test_id].data() + i * recall_at)[0];
 
                     if (use_cached_top1) {
                         const auto& neighbors = dual_graph->get_neighbours(top1_id);
 
+//                        int k = (j == 0) ? 10 : 0;
                         for (auto neighbor_id : neighbors) {
-                            float distance_cmp = index->get_distance(norm_query, 10000);
                             float distance = index->get_distance(norm_query, neighbor_id);
                             if (distance < result_queue.top().first and result_set.find(neighbor_id) == result_set.end()){
                                 result_set.insert(neighbor_id);
                                 result_queue.push({distance, neighbor_id});
                                 result_queue.pop();
+                                succ++;
                             }
                             if (distance < (query_result_dists[test_id].data() + i * recall_at)[0]) {
                                 find_new = true;
                             }
+                            dis_cmp++;
+                            if (dis_cmp > 30)
+                                break;
                         }
 
                     }
+
+//                    #pragma omp critical
+//                    {
+//                        dis_cmp_total += dis_cmp;
+//                    };
 
                     if (find_new) {
                         continue;
@@ -408,7 +374,10 @@ int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dua
                         break;
                     }
                 }
-
+//                #pragma omp critical
+//                {
+//                    succ_total += succ;
+//                };
                 delete[] norm_query;
 
                 auto sorted_result = sort_priority_queue(result_queue);
@@ -443,7 +412,7 @@ int same_node_test(std::unique_ptr<diskann::AbstractIndex> index, DualGraph* dua
             latency_stats[i] = (float)(diff.count() * 1000000);
         }
 
-//        std::cout << index->valid_insert << " " << query_num << std::endl;
+//        std::cout << 1.0 * succ_total / query_num << " " << 1.0 * dis_cmp_total / query_num << std::endl;
 
         if (is_train && test_id == 0) {
             for (auto p : add_edge_pairs)
@@ -645,11 +614,11 @@ int main(int argc, char **argv) {
         gt_file = data_prefix + "/" + dataset + "_gen_query_learn_gt100";
     }
 
-    num_threads = 112;
+    num_threads = 28;
     if (is_train)
         num_threads = 112;
     if (not is_train) {
-        for (int i = 20; i <= 100; i+=10){
+        for (int i = 10; i <= 100; i+=10){
             Lvec.push_back(i);
         }
     } else {
@@ -673,7 +642,7 @@ int main(int argc, char **argv) {
             .build();
     auto index_factory = diskann::IndexFactory(config);
     auto index = index_factory.create_instance();
-    index->load(index_path.c_str(), num_threads, *(std::max_element(Lvec.begin(), Lvec.end())));
+    index->load(index_path.c_str(), num_threads, 500);
 
 
     DualGraph* dual_graph = new DualGraph(base_num);
@@ -709,6 +678,9 @@ int main(int argc, char **argv) {
                 std::unordered_set<diskann::location_t> neighbors_set(neighbors.begin(), neighbors.end());
 
                 for (int j = 0; j < build_R; j++) {
+                    if (dual_graph->get_neighbours(i).size() >= 10) {
+                        break;
+                    }
                     auto cand_id = id[j];
                     if (neighbors_set.find(cand_id) == neighbors_set.end() and cand_id != i) {
                         dual_graph->add_neighbour(i, cand_id);

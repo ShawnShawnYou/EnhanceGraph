@@ -51,6 +51,7 @@ class AbstractIndex
         VAMANA = 0,
         NSG = 1,
         TAUMNG = 2,
+        KNNG = 3
     };
 
     prune_strategy strategy = NSG;

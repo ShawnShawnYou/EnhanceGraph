@@ -916,7 +916,17 @@ std::pair<uint32_t, uint32_t> Index<T, TagT, LabelT>::iterate_to_fixed_point(
                 _locks[n].lock();
             for (auto id : _graph_store->get_neighbours(n))
             {
-                assert(id < _max_points + _num_frozen_pts);
+                if (id >= _max_points + _num_frozen_pts){
+                    std::cout << std::endl;
+                    std::cout << n << std::endl;
+                    std::cout <<  _graph_store->get_neighbours(n).size() << std::endl;
+                    for (int tmp_i = 0; tmp_i < _graph_store->get_neighbours(n).size(); tmp_i++) {
+                        std::cout << _graph_store->get_neighbours(n)[tmp_i] << " ";
+                    }
+                    std::cout << std::endl;
+                    std::cout << id << std::endl;
+                    assert(id < _max_points + _num_frozen_pts);
+                }
 
                 if (use_filter)
                 {
@@ -1378,6 +1388,9 @@ void Index<T, TagT, LabelT>::prune_neighbors(const uint32_t location, std::vecto
 {
     if (strategy == NSG or strategy == TAUMNG)
         _indexingAlpha = 1;
+    if (strategy == KNNG) {
+        _indexingAlpha = 1000;
+    }
     prune_neighbors(location, pool, _indexingRange, _indexingMaxC, _indexingAlpha, pruned_list, scratch);
 }
 
@@ -1494,7 +1507,7 @@ void Index<T, TagT, LabelT>::inter_insert(uint32_t n, std::vector<uint32_t> &pru
 
 template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT>::link()
 {
-    uint32_t num_threads = _indexingThreads;
+    uint32_t num_threads = 1;
     if (num_threads != 0)
         omp_set_num_threads(num_threads);
 
@@ -1546,53 +1559,10 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
             LockGuard guard(_locks[node]);
 
             _graph_store->set_neighbours(node, pruned_list);
-//            _knn_graph_store->set_neighbours(node, original_list);
             assert(_graph_store->get_neighbours((location_t)node).size() <= _indexingRange);
         }
 
         inter_insert(node, pruned_list, scratch);   // todo key 这里是吧pruned_list里面的所有节点做一次判断和prune
-
-        if (node_ctr % 100000 == 0)
-        {
-            diskann::cout << "\r" << (100.0 * node_ctr) / (visit_order.size()) << "% of index build completed."
-                          << std::flush;
-        }
-    }
-
-
-//    omp_set_num_threads(1);
-    auto s = std::chrono::high_resolution_clock::now();
-    // 第二遍构建
-    #pragma omp parallel for schedule(dynamic, 2048)
-    for (int64_t node_ctr = 0; node_ctr < (int64_t)(visit_order.size()); node_ctr++)
-    {
-        auto node = visit_order[node_ctr];
-
-        ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);  // multi-threads pop a scratch
-        auto scratch = manager.scratch_space();
-
-        std::vector<uint32_t> original_list;
-        std::vector<uint32_t> pruned_list;
-        if (_filtered_index)
-        {
-            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, original_list, scratch, _filtered_index,
-                                       _filterIndexingQueueSize);
-        }
-        else
-        {
-            search_for_point_and_prune(node, _indexingQueueSize, pruned_list, original_list, scratch); // todo key
-        }
-        {
-            LockGuard guard(_locks[node]);
-//            _dual_graph_store->set_neighbours(node, original_list);
-        }
-
-        if (node_ctr % 100000 == 0)
-        {
-            diskann::cout << "\r" << (100.0 * node_ctr) / (visit_order.size()) << "% of index build completed."
-            << std::flush;
-        }
-
 
         if (strategy == TAUMNG) {
             std::vector<uint32_t> new_out_neighbors(_graph_store->get_neighbours(node).begin(), _graph_store->get_neighbours(node).end());
@@ -1635,11 +1605,13 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
             _graph_store->set_neighbours((location_t)node, new_out_neighbors);
 
         }
-    }
 
-    auto e = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> diff = e - s;
-    diskann::cout << std::endl << "Dual Graph Indexing time: " << diff.count() << std::endl;
+        if (node_ctr % 100000 == 0)
+        {
+            diskann::cout << "\r" << (100.0 * node_ctr) / (visit_order.size()) << "% of index build completed."
+                          << std::flush;
+        }
+    }
 
     if (_nd > 0)
     {
@@ -1650,7 +1622,7 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
     for (int64_t node_ctr = 0; node_ctr < (int64_t)(visit_order.size()); node_ctr++)
     {
         auto node = visit_order[node_ctr];
-        if (_graph_store->get_neighbours((location_t)node).size() > _indexingRange)
+        if (strategy != TAUMNG and _graph_store->get_neighbours((location_t)node).size() > _indexingRange)
         {
             ScratchStoreManager<InMemQueryScratch<T>> manager(_query_scratch);
             auto scratch = manager.scratch_space();
@@ -1672,37 +1644,8 @@ template <typename T, typename TagT, typename LabelT> void Index<T, TagT, LabelT
 
             _graph_store->clear_neighbours((location_t)node);
             _graph_store->set_neighbours((location_t)node, new_out_neighbors);
-
-            // reduce graph size
-//            auto full_neighbors = _dual_graph_store->get_neighbours((location_t)node);
-//            auto proximity_neighbors = _graph_store->get_neighbours((location_t)node);
-//            std::unordered_set<uint32_t> proximity_neighbor_set(proximity_neighbors.begin(), proximity_neighbors.end());
-
-//            std::vector<uint32_t> dual_neighbors;
-//            for (auto neighbor : full_neighbors) {
-//                if (neighbor != node and proximity_neighbor_set.find(neighbor) == proximity_neighbor_set.end()) {
-//                    dual_neighbors.emplace_back(neighbor);
-//                    proximity_neighbor_set.insert(neighbor);
-//                }
-//            }
-
-//            if (dual_neighbors.size() + _graph_store->get_neighbours((location_t)node).size() > _indexingRange or
-//            _graph_store->get_neighbours((location_t)node).size() > _indexingRange) {
-//                std::cout << std::endl;
-//                std::cout
-//                << node << " "
-//                << dual_neighbors.size() << " "
-//                << _graph_store->get_neighbours((location_t)node).size() << " "
-//                << full_neighbors.size() << std::endl;
-//                exit(0);
-//            };
-
-//            _dual_graph_store->clear_neighbours((location_t)node);
-//            _dual_graph_store->set_neighbours((location_t)node, dual_neighbors);
         }
-
     }
-
     if (_nd > 0)
     {
         diskann::cout << "done. Link time: " << ((double)link_timer.elapsed() / (double)1000000) << "s" << std::endl;
