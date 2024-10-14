@@ -1,4 +1,4 @@
-# EnhanceGraph: An Enhanced Graph-Based Index for High-Dimensional Approximate Nearest Neighbor Search [VLDB2025]
+# EnhanceGraph: An Enhanced Graph-Based Index for High-Dimensional Approximate Nearest Neighbor Search [WWW2025]
 ## Introduction 
 - This repo is the implementation of "EnhanceGraph: An Enhanced Graph-Based Index for High-Dimensional Approximate Nearest Neighbor Search".
 - We add features based on the [DISKANN](https://github.com/microsoft/DiskANN). Thus, the basic usage of this repo is consistent with DISKANN.
@@ -20,8 +20,6 @@
     - train_R (number of generated search points, typically 5)
 
 ## Running Instructions (EXAMPLE IN VSAG)
-Note that the conjugate graph has been integrated into Ant Group's vector indexing library for similarity search. The corresponding open-source code is in [VSAG](https://github.com/alipay/vsag). 
-
 For a simple example, refer to examples/cpp/example_conjugate_graph.cpp in VSAG to see the recall rate enhancement directly.
 
 If you want more details about our experiment, follow these instructions. (WARNING: The instructions are only examples. To run them, you need to configure many parameters and paths in the code. As it may take a lot of time to run and debug, we recommend running the example code in VSAG. :) )
