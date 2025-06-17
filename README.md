@@ -1,4 +1,4 @@
-# EnhanceGraph: An Enhanced Graph-Based Index for High-Dimensional Approximate Nearest Neighbor Search [ICDE 2026]
+# EnhanceGraph: An Enhanced Graph-Based Index for High-Dimensional Approximate Nearest Neighbor Search
 ## Introduction 
 - This repo is the implementation of "EnhanceGraph: An Enhanced Graph-Based Index for High-Dimensional Approximate Nearest Neighbor Search".
 - We add features based on the [DISKANN](https://github.com/microsoft/DiskANN). Thus, the basic usage of this repo is consistent with DISKANN.
